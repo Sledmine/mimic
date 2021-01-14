@@ -1,2 +1,2 @@
 # Mimic
-Halo Custom Edition IA Sync
+Halo Custom Edition AI Sync
