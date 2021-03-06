@@ -7,7 +7,6 @@ api_version = "1.12.0.0"
 
 -- Lua libraries
 local inspect = require "inspect"
-local json = require "json"
 
 -- Halo Custom Edition specific libraries
 local blam = require "blam"
