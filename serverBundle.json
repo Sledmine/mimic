@@ -1,5 +1,5 @@
 {
-    "name": "Mimic",
+    "name": "Mimic Server",
     "target": "lua53",
     "include": [
         "modules\\"
@@ -10,8 +10,9 @@
         "json",
         "blam",
         "color",
+        "struct",
         "mimic.core"
     ],
-    "main":"mimic_client",
-    "output": "dist\\mimic_client.lua"
+    "main":"mimic_serevr",
+    "output": "dist\\mimic_server.lua"
 }

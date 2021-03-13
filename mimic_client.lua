@@ -13,9 +13,6 @@ function OnTick()
         local tempObject = blam.object(get_object(objectIndex))
         if (tempObject and tempObject.type == objectClasses.biped and
             blam.isNull(tempObject.playerId)) then
-            console_out(
-                objectIndex .. ": " .. tempObject.x .. " " .. tempObject.y .. " " ..
-                    tempObject.z)
             tempObject.x = 0
             tempObject.y = 0
             tempObject.z = 0
@@ -25,8 +22,7 @@ function OnTick()
 end
 
 function OnRcon(message)
-    --console_out(message)
-    --console_out(#message)
+    console_out(message)
     return false
 end
 

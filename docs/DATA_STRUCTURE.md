@@ -14,8 +14,6 @@ delimited by a comma or a special char (comma by default).
 "@s(2)"
 
 -- First parameter is the tagIndex of the biped object that the server is trying to sync
--- Second parameter is the position in axis X of the biped object
--- Third parameter is the position in axis Y of the biped object
--- Fourth parameter is the position in axis Z of the biped object
-"@s(2),tagIndex(4),i4x(10),i4x(10),i4x(10)"
+-- Second parameter is the object id from the server
+"@s(2),tagIndex(1-5),serverId1(1-5)"
 ```
