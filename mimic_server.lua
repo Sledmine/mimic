@@ -12,7 +12,8 @@ local inspect = require "inspect"
 local blam = require "blam"
 
 -- Mimic specific variables & depenencies
-local listAi, clkTics = {}, 0
+local listAi = {}
+local clockTicks = 0
 
 -- On tick function provided by default if needed
 -- Be careful at handling data here, things can be messy
@@ -25,16 +26,15 @@ function OnTick(playerIndex)
     end
 
 
-    if (clkTics == 5) then
+    if (clockTicks == 5) then
         for index, objectId in pairs(listAi) do
             local biped = blam.biped(get_object(objectId))
-            --rprint(1, biped.x .. biped.y .. biped.z .. clkTics) 
-            rprint(1, clkTics)
+            rprint(1, "@" .. biped.x .. biped.y .. biped.z)
         end
-        clkTics = 0
+        clockTicks = 0
     end
     
-    clkTics = clkTics + 1
+    clockTicks = clockTicks + 1
 end
 
 -- Put initialization code here
@@ -52,6 +52,8 @@ function OnObjectSpawn(playerIndex, tagId, parentId, objectId)
         print("playerIndex: " .. playerIndex)
         print("tagPath: " .. tempTag.path)
         print("objectId: " .. objectId)
+        data = "#".. #listAi
+        print(data)
     end
     return true
 end
