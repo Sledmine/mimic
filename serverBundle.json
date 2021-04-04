@@ -7,12 +7,9 @@
     "modules": [
         "glue",
         "inspect",
-        "json",
         "blam",
-        "color",
-        "struct",
         "mimic.core"
     ],
-    "main":"mimic_serevr",
+    "main":"mimic_server",
     "output": "dist\\mimic_server.lua"
 }

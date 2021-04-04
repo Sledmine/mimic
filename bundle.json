@@ -5,11 +5,9 @@
         "modules\\"
     ],
     "modules": [
+        "blam",
         "glue",
         "inspect",
-        "json",
-        "blam",
-        "color",
         "mimic.core"
     ],
     "main":"mimic_client",
