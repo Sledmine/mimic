@@ -1,6 +1,3 @@
--- SAPP Lua Script Boilerplate
--- Version 1.0
--- Every function uses lower camel case, be careful about naming conventions
 -- Api version must be declared at the top
 -- It helps lua-blam to detect if the script is made for SAPP or Chimera
 api_version = "1.12.0.0"
@@ -19,7 +16,6 @@ blam = require "blam"
 local core = require "mimic.core"
 
 local aiList = {}
-local aiSync = {}
 local tickJump = 4
 local tickClock = 0
 
@@ -34,19 +30,9 @@ function OnTick()
         end
     end
     if (tickClock == tickJump) then
-        for objectId, ai in pairs(aiList) do
+        for objectId, tagId in pairs(aiList) do
             local biped = blam.biped(get_object(objectId))
             if (biped) then
-                if (not ai.synced) then
-                    aiSync[objectId] = {x = biped.x, y = biped.y, z = biped.z}
-                    ai.synced = true
-                    local spawnPacket = core.spawnPacket(objectId, aiSync[objectId])
-                    print("Sending sync packet..")
-                    rprint(1, spawnPacket)
-                    rprint(2, spawnPacket)
-                    rprint(3, spawnPacket)
-                    rprint(4, spawnPacket)
-                end
                 if (biped.health <= 0) then
                     local killPacket = core.deletePacket(objectId)
                     rprint(1, killPacket)
@@ -56,31 +42,25 @@ function OnTick()
                     -- Remove it from list
                     aiList[objectId] = nil
                 else
-                    biped.x = biped.x
-                    biped.y = biped.y
-                    biped.z = biped.z
                     local updatePacket = core.updatePacket(objectId, biped)
                     rprint(1, updatePacket)
                     rprint(2, updatePacket)
                     rprint(3, updatePacket)
                     rprint(4, updatePacket)
                 end
-            else
-                -- Remove it from list
-                aiList[objectId] = nil
             end
         end
         tickClock = 0
     end
-    --print(inspect(aiSync))
+
     tickClock = tickClock + 1
 end
 
 function OnPlayerJoin(playerIndex)
-    print(get_var(1, "$ip"))
-    for objectId, ai in pairs(aiList) do
-        local spawnPacket = core.spawnPacket(ai.tagId, objectId)
+    for objectId, tagId in pairs(aiList) do
+        local spawnPacket = core.spawnPacket(tagId, objectId)
         rprint(playerIndex, spawnPacket)
+
     end
 end
 
@@ -92,23 +72,19 @@ function OnScriptLoad()
     register_callback(cb["EVENT_JOIN"], "OnPlayerJoin")
 end
 
--- Get biped tag id from AI and ignore players
+-- Change biped tag =id from players and store their object ids
 function OnObjectSpawn(playerIndex, tagId, parentId, objectId)
     local tempTag = blam.getTag(tagId)
     if (tempTag and tempTag.class == blam.tagClasses.biped and playerIndex == 0) then
-        print("playerIndex: " .. playerIndex)
-        print("tagId: " .. tagId)
-        print("tagIndex: " .. core.getIndexById(tagId))
-        print("tagPath: " .. tempTag.path)
-        print("objectId: " .. objectId)
-        print("objectIndex: " .. core.getIndexById(objectId))
-        -- Track this biped as an AI
-        aiList[objectId] = {tagId = tagId, synced = false}
-        --[[local spawnPacket = core.spawnPacket(tagId, objectId)
+        --print("playerIndex: " .. playerIndex)
+        --print("tagPath: " .. tempTag.path)
+        --print("objectId: " .. objectId)
+        aiList[objectId] = tagId
+        local spawnPacket = core.spawnPacket(tagId, objectId)
         rprint(1, spawnPacket)
         rprint(2, spawnPacket)
         rprint(3, spawnPacket)
-        rprint(4, spawnPacket)]]
+        rprint(4, spawnPacket)
     end
     return true
 end
