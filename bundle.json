@@ -2,7 +2,7 @@
     "name": "Mimic",
     "target": "lua53",
     "include": [
-        "modules\\"
+        "lua/"
     ],
     "modules": [
         "blam",
@@ -10,6 +10,6 @@
         "inspect",
         "mimic.core"
     ],
-    "main":"mimic_client",
-    "output": "dist\\mimic_client.lua"
+    "main":"client/mimic_client",
+    "output": "dist/mimic_client.lua"
 }

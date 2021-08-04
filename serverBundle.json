@@ -2,14 +2,15 @@
     "name": "Mimic Server",
     "target": "lua53",
     "include": [
-        "modules\\"
+        "lua/"
     ],
     "modules": [
+        "struct",
         "glue",
         "inspect",
         "blam",
         "mimic.core"
     ],
-    "main":"mimic_server",
-    "output": "dist\\mimic_server.lua"
+    "main": "server/mimic_server",
+    "output": "dist/mimic_server.lua"
 }
