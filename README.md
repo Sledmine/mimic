@@ -15,5 +15,5 @@
 Halo Custom Edition AI Sync, this project aims to provide AI synchronization in the most optimized
 and simple way as possible, made with Lua for SAPP and Chimera.
 
-This project is on early development, feel free to contribute and join our Discord
+This project is on early development, feel free to contribute and join our [Discord server](https://discord.shadowmods.net)
 server if you want to get more information about design, goals and updates for the project.
