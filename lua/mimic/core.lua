@@ -2,13 +2,38 @@ local glue = require "glue"
 local blam = require "blam"
 
 local core = {}
+local lastLog = ""
 
 local concat = table.concat
+
+---@class aiData
+---@field tagId number
+---@field objectId number
+---@field objectIndex number
+---@field timeSinceLastUpdate number
 
 -- Mimic constants
 local spawnPacketTemplate = "@s,%s,%s"
 local updatePacketTemplate = "@u,%s,%s,%s,%s,%s,%s,%s,%s"
 local deletePacketTemplate = "@k,%s"
+
+function core.log(message, ...)
+    if (debugMode) then
+        if (...) then
+            local formattedMessage = string.format(message, ...)
+            if (lastLog ~= formattedMessage) then
+                lastLog = formattedMessage
+                console_out(formattedMessage)
+            end
+            return
+        end
+        if (lastLog ~= message) then
+            lastLog = message
+            console_out(message)
+        end
+        return
+    end
+end
 
 function core.encode(format, value)
     return glue.string.tohex(string.pack(format, value))
@@ -44,10 +69,20 @@ end
 ---@param biped biped
 ---@return string updatePacket
 function core.updatePacket(serverId, biped)
-    return updatePacketTemplate:format(serverId, core.encode("f", biped.x),
-                                       core.encode("f", biped.y), core.encode("f", biped.z),
-                                       biped.animation, biped.animationFrame,
-                                       core.encode("f", biped.vX), core.encode("f", biped.vY))
+    if (blam.isNull(biped.vehicleObjectId)) then
+        return updatePacketTemplate:format(serverId, core.encode("f", biped.x),
+                                           core.encode("f", biped.y), core.encode("f", biped.z),
+                                           biped.animation, biped.animationFrame,
+                                           core.encode("f", biped.vX), core.encode("f", biped.vY))
+    else
+        local vehicle = blam.object(get_object(biped.vehicleObjectId))
+        if (vehicle) then
+            updatePacketTemplate:format(serverId, core.encode("f", vehicle.x),
+                                        core.encode("f", vehicle.y), core.encode("f", vehicle.z),
+                                        biped.animation, biped.animationFrame,
+                                        core.encode("f", biped.vX), core.encode("f", biped.vY))
+        end
+    end
 end
 
 function core.deletePacket(serverId)
