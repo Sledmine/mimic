@@ -1,3 +1,8 @@
+------------------------------------------------------------------------------
+-- Mimic Client
+-- Sledmine (https://github.com/Sledmine)
+-- Client side synchronization feature for AI
+------------------------------------------------------------------------------
 clua_version = 2.056
 
 local blam = require "blam"
@@ -12,6 +17,8 @@ debugMode = false
 local asyncMode = false
 local bipedCleaner = true
 local bipedCleanerCycle = 30000
+
+-- State
 local playerBipedTagId
 local queuePackets = {}
 local aiList = {}
@@ -154,6 +161,7 @@ function OnTick()
                     -- Check if this object is already being synced
                     -- Prevent biped legs from being removed
                     -- This requires that no other AI uses the same biped as the player
+                    -- FIXME Somehow player legs are being removed, checkout what is happening
                     if (playerBipedTagId and object.tagId ~= playerBipedTagId) then
                         if (not isSyncedBiped(object)) then
                             -- core.log("objectId: %s", serverBipedObjectId)
@@ -219,7 +227,7 @@ function OnCommand(command)
         return false
     elseif (command == "mcleaner" or command == "mcl") then
         bipedCleaner = not bipedCleaner
-        console_out("Biped cleaner " .. tostring(bipedCleaner))
+        console_out("Biped cleaner: " .. tostring(bipedCleaner))
         return false
     end
 end

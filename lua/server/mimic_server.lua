@@ -58,7 +58,7 @@ function GetSyncCommand(_, command)
     if (command ~= "nd" and syncCommand ~= command) then
         syncCommand = command
         console_out(syncCommand)
-        -- TODO Add object_create interceptor to avoid syncing vehicles and bipeds
+        -- Check if the map is trying to get a player on a vehicle
         if (syncCommand:find("unit_enter_vehicle") and syncCommand:find("player")) then
             local params = glue.string.split(syncCommand, " ")
             local unitName = params[2]
@@ -83,6 +83,7 @@ function GetSyncCommand(_, command)
                 end
             end
         else
+            -- Prevent object creation only if maps wants to create a non biped/vehicle object
             if (syncCommand:find("object_create")) then
                 local params = glue.string.split(syncCommand, " ")
                 local objectName = params[2]
@@ -99,6 +100,8 @@ function GetSyncCommand(_, command)
             end
             broadcast(syncCommand)
         end
+        -- This is not really required, needs testing as it triggers twice the set callback
+        -- FIXME Improve testing on this
         execute_command([[set sync_hsc_command ""]])
     end
 end
@@ -157,8 +160,10 @@ local function syncUpdateAI()
                     local killPacket = core.deletePacket(serverObjectId)
                     broadcast(killPacket)
                     if (not aiCollection[serverObjectId]) then
-                        -- YOLO
+                        -- Biped is now dead, remove it from the list
+                        -- Set that this biped already has a timer asigned for removal
                         aiCollection[serverObjectId] = true
+                        -- Set up a collector timer, it helps to ensure players recive this packet
                         timer(1000, "CleanBipeds", serverObjectId)
                     end
                 end
@@ -169,20 +174,6 @@ local function syncUpdateAI()
         end
     end
     return true
-end
-
-local function SyncKillAI()
-    for serverObjectId, tagId in pairs(aiList) do
-        local biped = blam.biped(get_object(serverObjectId))
-        if (biped) then
-            if (biped.health <= 0) then
-                local killPacket = core.deletePacket(serverObjectId)
-                broadcast(killPacket)
-                -- Biped is now dead, remove it from the list
-                --aiList[serverObjectId] = nil
-            end
-        end
-    end
 end
 
 function OnPlayerJoin(playerIndex)
@@ -206,7 +197,9 @@ function OnPlayerDead(deadPlayerIndex)
                     local playerName = get_var(currentPlayerIndex, "$name")
                     say_all("Using " .. playerName .. " as a respawn point..")
                     local playerSpawns = scenario.spawnLocationList
-                    -- TODO Change this later to index 2 for map standards
+                    -- Update second player spawn point on the scenario
+                    -- Usually the first spawn point is for local/campaign purposes only
+                    -- So handle second player spawn point as a standard from now on
                     if (blam.isNull(player.vehicleObjectId)) then
                         playerSpawns[2].x = player.x
                         playerSpawns[2].y = player.y
@@ -219,7 +212,7 @@ function OnPlayerDead(deadPlayerIndex)
                             playerSpawns[2].z = vehicle.z
                         end
                     end
-                    -- Update player spawns on the scenario
+                    -- Update player spawns list on the scenario
                     scenario.spawnLocationList = playerSpawns
                     break
                 end
