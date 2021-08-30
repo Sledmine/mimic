@@ -33,6 +33,8 @@ local syncCycle = 100
 -- State
 local aiList = {}
 local aiCollection = {}
+local mapBipedTags = {}
+local customPlayerBipeds = {}
 local vehiclesList = {}
 local aiCount = 0
 local syncCommand = ""
@@ -62,7 +64,7 @@ function GetSyncCommand(_, command)
         if (syncCommand:find("unit_enter_vehicle") and syncCommand:find("player")) then
             local params = glue.string.split(syncCommand, " ")
             local unitName = params[2]
-            --local playerIndex = to_player_index(tonumber(params[2], 10))
+            -- local playerIndex = to_player_index(tonumber(params[2], 10))
             local playerIndex = to_player_index(tonumber(unitName:gsub("player", ""), 10))
             local objectName = params[3]
             local seatIndex = tonumber(params[4], 10)
@@ -108,7 +110,7 @@ end
 
 function CleanBipeds(strServerObjectId)
     local serverObjectId = tonumber(strServerObjectId)
-    --console_out("Cleaning biped " .. serverObjectId)
+    -- console_out("Cleaning biped " .. serverObjectId)
     aiCollection[serverObjectId] = nil
     aiList[serverObjectId] = nil
     return false
@@ -137,16 +139,14 @@ local function syncUpdateAI()
                                 if (blam.isNull(player.vehicleObjectId)) then
                                     if (core.objectIsNearTo(player, ai, syncRadius)) then
                                         core.log("Sending package to %s", playerIndex)
-                                        local updatePacket =
-                                            core.updatePacket(serverObjectId, ai)
+                                        local updatePacket = core.updatePacket(serverObjectId, ai)
                                         send(playerIndex, updatePacket)
                                     end
                                 else
                                     local vehicle = blam.object(get_object(player.vehicleObjectId))
                                     if (vehicle and core.objectIsNearTo(vehicle, ai, syncRadius)) then
                                         core.log("Sending package to %s", playerIndex)
-                                        local updatePacket =
-                                            core.updatePacket(serverObjectId, ai)
+                                        local updatePacket = core.updatePacket(serverObjectId, ai)
                                         send(playerIndex, updatePacket)
                                     end
                                 end
@@ -226,7 +226,7 @@ function OnPlayerDead(deadPlayerIndex)
     end
     if (deaths == playersCount) then
         say_all("Game over, AI wins...")
-        --execute_script("sv_map_next")
+        -- execute_script("sv_map_next")
     end
 end
 
@@ -244,6 +244,40 @@ end
 function ResetState()
     aiList = {}
     vehiclesList = {}
+    mapBipedTags = {}
+    customPlayerBipeds = {}
+end
+
+function OnGameStart()
+    for tagIndex = 0, blam.tagDataHeader.count - 1 do
+        local tag = blam.getTag(tagIndex)
+        if (tag and tag.class == blam.tagClasses.biped) then
+            local pathSplit = glue.string.split(tag.path, "\\")
+            local tagFileName = pathSplit[#pathSplit]
+            mapBipedTags[tagFileName] = tag
+        end
+    end
+end
+
+function OnCommand(playerIndex, command, environment)
+    if (environment == 2) then
+        if (command == "blist") then
+            glue.map(mapBipedTags, function(bipedName) rprint(playerIndex, bipedName) end)
+            return false
+        else
+            for bipedName, bipedTag in pairs(mapBipedTags) do
+                if (command == bipedName) then
+                    customPlayerBipeds[playerIndex] = bipedTag
+                    local player = blam.player(get_player(playerIndex))
+                    local playerBiped = blam.biped(get_object(player.objectId))
+                    if (playerBiped) then
+                        delete_object(player.objectId)
+                    end
+                    return false
+                end
+            end
+        end
+    end
 end
 
 -- Put initialization code here
@@ -263,16 +297,25 @@ function OnScriptLoad()
     register_callback(cb["EVENT_DIE"], "IncreaseHealth")
     register_callback(cb["EVENT_DIE"], "OnPlayerDead")
     register_callback(cb["EVENT_ECHO"], "GetSyncCommand")
+    register_callback(cb["EVENT_GAME_START"], "OnGameStart")
+    register_callback(cb["EVENT_COMMAND"], "OnCommand")
 end
 
 -- Create a list of AI and Vehicles being spawned
 function OnObjectSpawn(playerIndex, tagId, parentId, objectId)
     local tag = blam.getTag(tagId)
     if (tag) then
-        if (tag.class == blam.tagClasses.biped and playerIndex == 0) then
-            aiList[objectId] = tagId
-            local spawnPacket = core.spawnPacket(tagId, objectId)
-            broadcast(spawnPacket)
+        if (tag.class == blam.tagClasses.biped) then
+            if (playerIndex == 0) then
+                aiList[objectId] = tagId
+                local spawnPacket = core.spawnPacket(tagId, objectId)
+                broadcast(spawnPacket)
+            else
+                local customBipedTag = customPlayerBipeds[playerIndex]
+                if (customBipedTag) then
+                    return true, customBipedTag.id
+                end
+            end
         elseif (tag.class == blam.tagClasses.vehicle) then
             vehiclesList[objectId] = tagId
         end

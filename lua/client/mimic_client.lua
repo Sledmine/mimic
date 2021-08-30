@@ -12,14 +12,15 @@ local core = require "mimic.core"
 local inspect = require "inspect"
 local glue = require "glue"
 
--- Script config and variables
+-- Script setting variables (do not modify them manually)
 debugMode = false
+local lastMapName
+local enableSync = false
 local asyncMode = false
 local bipedCleaner = true
 local bipedCleanerCycle = 30000
 
 -- State
-local playerBipedTagId
 local queuePackets = {}
 local aiList = {}
 local aiCollection = {}
@@ -36,9 +37,6 @@ function dprint(message, ...)
 end
 
 function OnMapLoad()
-    -- if (server_type == "dedicated") then
-    --    execute_script("allow_client_side_weapon_projectile false")
-    -- end
     queuePackets = {}
     aiList = {}
 end
@@ -59,9 +57,18 @@ function CleanBipeds(serverId)
 end
 
 function ProcessPacket(message, packetType, packet)
+    -- Enable synchronization only when the server sent a mimic packet
+    if (not enableSync) then
+        enableSync = true
+        -- As this is now syncing, we need to stop projectiles duplication on the client
+        -- FIXME Create a packet to ask the client to stop creating projectiles
+    end
     local time = os.clock()
     -- dprint("Packet %s size: %s", packetType, #message)
     if (packetType == "@s") then
+    -- TODO Add some kind of validation to prevent spamming this commands
+        dprint("Disabling client side projectiles...")
+        execute_script("allow_client_side_weapon_projectiles 0")
         execute_script("ai_erase_all")
         local tagId = tonumber(packet[2])
         local serverId = packet[3]
@@ -145,27 +152,28 @@ local function isSyncedBiped(object)
 end
 
 function OnTick()
-    -- TODO Add validation for existing encounters on this map
-    if (server_type == "dedicated") then
-        local player = blam.biped(get_dynamic_player())
-        if (player and not playerBipedTagId) then
-            playerBipedTagId = player.tagId
-
+    if (lastMapName ~= map) then
+        lastMapName = map
+        if (lastMapName == "ui") then
+            dprint("Restoring client side projectiles...")
+            execute_script("allow_client_side_weapon_projectiles 1")
         end
-        -- Filtering for objects that are being synced from the server
-        for _, objectIndex in pairs(blam.getObjects()) do
-            local object = blam.object(get_object(objectIndex))
-            if (object) then
-                if (object.type == objectClasses.biped and blam.isNull(object.playerId) and
-                    blam.isNull(object.nameIndex)) then
-                    -- Check if this object is already being synced
-                    -- Prevent biped legs from being removed
-                    -- This requires that no other AI uses the same biped as the player
-                    -- FIXME Somehow player legs are being removed, checkout what is happening
-                    if (playerBipedTagId and object.tagId ~= playerBipedTagId) then
+    end
+    -- Start removing the server created bipeds only when the server aks for it
+    if (server_type == "dedicated") then
+        if (enableSync) then
+            -- Filtering for objects that are being synced from the server
+            for _, objectIndex in pairs(blam.getObjects()) do
+                local object = blam.object(get_object(objectIndex))
+                -- Only process objects that are bipeds
+                if (object and object.type == objectClasses.biped) then
+                    --[[ Remove bipeds matching these conditions:
+                        Is alive (has more than 0 health)
+                        Does not belongs to a player (it does not have player id)
+                    ]]
+                    if (object.health > 0 and blam.isNull(object.playerId)) then
+                        -- Check if this object is already being synced
                         if (not isSyncedBiped(object)) then
-                            -- core.log("objectId: %s", serverBipedObjectId)
-                            -- core.log("tagId: %s", playerBipedTagId)
                             object.zVel = 0
                             object.x = 0
                             object.y = 0
@@ -176,12 +184,13 @@ function OnTick()
                     end
                 end
             end
-        end
-        for i = 1, #queuePackets do
-            local pendingPacket = queuePackets[i]
-            if (pendingPacket) then
-                ProcessPacket(pendingPacket[1], pendingPacket[2], pendingPacket[3])
-                table.remove(queuePackets, i)
+            -- "Async" mode functionality, experimental!!
+            for i = 1, #queuePackets do
+                local pendingPacket = queuePackets[i]
+                if (pendingPacket) then
+                    ProcessPacket(pendingPacket[1], pendingPacket[2], pendingPacket[3])
+                    table.remove(queuePackets, i)
+                end
             end
         end
     end
@@ -232,7 +241,15 @@ function OnCommand(command)
     end
 end
 
+function OnUnload()
+    if (ticks() > 0) then
+        dprint("Restoring client side projectiles...")
+        execute_script("allow_client_side_weapon_projectiles 1")
+    end
+end
+
 set_callback("map load", "OnMapLoad")
+set_callback("unload", "OnUnload")
 set_callback("command", "OnCommand")
 set_callback("tick", "OnTick")
 set_callback("rcon message", "OnPacket")
