@@ -128,9 +128,7 @@ local function syncUpdateAI()
     if (playersCount > 0) then
         for serverObjectId, tagId in pairs(aiList) do
             local ai = blam.biped(get_object(serverObjectId))
-            -- Prevent dead AI and cinematic/script objects from being updated/synced
-            -- FIXME: Probably we need a better way to differentiate this type of cinematic unit
-            if (ai and blam.isNull(ai.nameIndex)) then
+            if (ai) then
                 if (ai.health > 0) then
                     for playerIndex = 1, 16 do
                         if (player_present(playerIndex)) then
@@ -138,21 +136,25 @@ local function syncUpdateAI()
                             if (player) then
                                 if (blam.isNull(player.vehicleObjectId)) then
                                     if (core.objectIsNearTo(player, ai, syncRadius)) then
-                                        core.log("Sending package to %s", playerIndex)
+                                        -- FIXME In some cases packet is nil, review it
                                         local updatePacket = core.updatePacket(serverObjectId, ai)
-                                        send(playerIndex, updatePacket)
+                                        if (updatePacket) then
+                                            send(playerIndex, updatePacket)
+                                        end
                                     end
                                 else
                                     local vehicle = blam.object(get_object(player.vehicleObjectId))
                                     if (vehicle and core.objectIsNearTo(vehicle, ai, syncRadius)) then
-                                        core.log("Sending package to %s", playerIndex)
+                                        -- FIXME In some cases packet is nil, review it
                                         local updatePacket = core.updatePacket(serverObjectId, ai)
-                                        send(playerIndex, updatePacket)
+                                        if (updatePacket) then
+                                            send(playerIndex, updatePacket)
+                                        end
                                     end
                                 end
                             else
-                                local updatePacket = core.updatePacket(serverObjectId, ai)
-                                send(playerIndex, updatePacket)
+                                --local updatePacket = core.updatePacket(serverObjectId, ai)
+                                --send(playerIndex, updatePacket)
                             end
                         end
                     end
@@ -179,6 +181,7 @@ end
 function OnPlayerJoin(playerIndex)
     -- Set players on the same team for coop purposes
     execute_script("st * red")
+    send(playerIndex, "disable_collision")
     for objectId, tagId in pairs(aiList) do
         local spawnPacket = core.spawnPacket(tagId, objectId)
         send(playerIndex, spawnPacket)
@@ -201,15 +204,19 @@ function OnPlayerDead(deadPlayerIndex)
                     -- Usually the first spawn point is for local/campaign purposes only
                     -- So handle second player spawn point as a standard from now on
                     if (blam.isNull(player.vehicleObjectId)) then
-                        playerSpawns[2].x = player.x
-                        playerSpawns[2].y = player.y
-                        playerSpawns[2].z = player.z
+                        for k,v in pairs(playerSpawns) do
+                            playerSpawns[k].x = player.x
+                            playerSpawns[k].y = player.y
+                            playerSpawns[k].z = player.z
+                        end
                     else
                         local vehicle = blam.object(get_object(player.vehicleObjectId))
                         if (vehicle) then
-                            playerSpawns[2].x = vehicle.x
-                            playerSpawns[2].y = vehicle.y
-                            playerSpawns[2].z = vehicle.z
+                            for k,v in pairs(playerSpawns) do
+                                playerSpawns[k].x = vehicle.x
+                                playerSpawns[k].y = vehicle.y
+                                playerSpawns[k].z = vehicle.z
+                            end
                         end
                     end
                     -- Update player spawns list on the scenario
@@ -277,6 +284,32 @@ function OnCommand(playerIndex, command, environment)
                 end
             end
         end
+    elseif (environment == 1) then
+        if (command:find("mdis")) then
+            local data = glue.string.split(command:gsub('"', ""), " ")
+            local newRadius = tonumber(data[2])
+            if (newRadius) then
+                syncRadius = newRadius
+                say_all("AI Count: " .. aiCount)
+                say_all("New mimic synchronization radius: " .. newRadius)
+                return false
+            else
+                say_all("AI Count: " .. aiCount )
+                say_all("Mimic synchronization radius: " .. syncRadius)
+                return false
+            end
+        end
+    end
+end
+
+function OnTick()
+    for playerIndex = 1,16 do
+        if (player_present(playerIndex)) then
+            local player = blam.biped(get_dynamic_player(playerIndex))
+            if (player) then
+                blam.bipedTag(player.tagId).disableCollision = true
+            end
+        end
     end
 end
 
@@ -294,7 +327,8 @@ function OnScriptLoad()
     register_callback(cb["EVENT_OBJECT_SPAWN"], "OnObjectSpawn")
     register_callback(cb["EVENT_JOIN"], "OnPlayerJoin")
     register_callback(cb["EVENT_GAME_END"], "ResetState")
-    register_callback(cb["EVENT_DIE"], "IncreaseHealth")
+    --register_callback(cb["EVENT_DIE"], "IncreaseHealth")
+    register_callback(cb["EVENT_TICK"], "OnTick")
     register_callback(cb["EVENT_DIE"], "OnPlayerDead")
     register_callback(cb["EVENT_ECHO"], "GetSyncCommand")
     register_callback(cb["EVENT_GAME_START"], "OnGameStart")
@@ -330,5 +364,7 @@ end
 
 -- Log traceback for debug purposes
 function OnError(Message)
-    print(debug.traceback())
+    local tb = debug.traceback()
+    print(tb)
+    say_all(tb)
 end

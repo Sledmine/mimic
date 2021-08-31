@@ -891,7 +891,8 @@ end
 ---@field isNotCastingShadow boolean Enable/disable object shadow casting
 ---@field isFrozen boolean Freeze/unfreeze object existence
 ---@field isOutSideMap boolean Is object outside/inside bsp
----@field isCollideable boolean Enable/disable object shadow casting
+---@field isCollideable boolean Enable/disable object collision, does not work with bipeds or vehicles
+---@field hasNoCollision boolean Enable/disable object collision, causes animation problems
 ---@field model number Gbxmodel tag ID
 ---@field health number Current health of the object
 ---@field shield number Current shield of the object
@@ -943,6 +944,7 @@ local objectStructure = {
     ignoreGravity = {type = "bit", offset = 0x10, bitLevel = 2},
     isInWater = {type = "bit", offset = 0x10, bitLevel = 3},
     isStationary = {type = "bit", offset = 0x10, bitLevel = 5},
+    hasNoCollision = {type = "bit", offset = 0x10, bitLevel = 7},
     dynamicShading = {type = "bit", offset = 0x10, bitLevel = 14},
     isNotCastingShadow = {type = "bit", offset = 0x10, bitLevel = 18},
     isFrozen = {type = "bit", offset = 0x10, bitLevel = 20},
@@ -1650,6 +1652,12 @@ local globalsTagStructure = {
 
 local firstPersonStructure = {weaponObjectId = {type = "dword", offset = 0x10}}
 
+---@class bipedTag
+---@field disableCollision number Disable collision of this biped tag
+local bipedTagStructure = {
+    disableCollision = {type = "bit", offset = 0x2F4, bitLevel = 5}
+}
+
 ------------------------------------------------------------------------------
 -- LuaBlam globals
 ------------------------------------------------------------------------------
@@ -1994,6 +2002,17 @@ end
 ---@return firstPerson
 function blam.firstPerson(address)
     return createObject(address or addressList.firstPerson, firstPersonStructure)
+end
+
+--- Create a biped tag from a tag path or id
+---@param tag string | number
+---@return bipedTag
+function blam.bipedTag(tag)
+    if (isValid(tag)) then
+        local bipedTag = blam.getTag(tag, tagClasses.biped)
+        return createObject(bipedTag.data, bipedTagStructure)
+    end
+    return nil
 end
 
 return blam

@@ -17,6 +17,7 @@ debugMode = false
 local lastMapName
 local enableSync = false
 local asyncMode = false
+local disablePlayerCollision = false
 local bipedCleaner = true
 local bipedCleanerCycle = 30000
 
@@ -155,12 +156,19 @@ function OnTick()
     if (lastMapName ~= map) then
         lastMapName = map
         if (lastMapName == "ui") then
+            disablePlayerCollision = false
             dprint("Restoring client side projectiles...")
             execute_script("allow_client_side_weapon_projectiles 1")
         end
     end
     -- Start removing the server created bipeds only when the server aks for it
     if (server_type == "dedicated") then
+        if (disablePlayerCollision) then
+            local player = blam.biped(get_dynamic_player())
+            if (player) then
+                blam.bipedTag(player.tagId).disableCollision = true
+            end
+        end
         if (enableSync) then
             -- Filtering for objects that are being synced from the server
             for _, objectIndex in pairs(blam.getObjects()) do
@@ -213,6 +221,9 @@ function OnPacket(message)
         dprint("Sync command: %s", command)
         execute_script(command)
         return false
+    elseif (message == "disable_collision") then
+        disablePlayerCollision = true
+        return false
     end
 end
 
@@ -244,6 +255,7 @@ end
 function OnUnload()
     if (ticks() > 0) then
         dprint("Restoring client side projectiles...")
+        disablePlayerCollision = false
         execute_script("allow_client_side_weapon_projectiles 1")
     end
 end
