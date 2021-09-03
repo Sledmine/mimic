@@ -38,6 +38,7 @@ local customPlayerBipeds = {}
 local vehiclesList = {}
 local aiCount = 0
 local syncCommand = ""
+local currentBspIndex
 
 local function broadcast(message)
     for playerIndex = 1, 16 do
@@ -56,8 +57,58 @@ local function hscSetCallback()
     execute_command("inspect sync_hsc_command", 0, true)
 end
 
-function GetSyncCommand(_, command)
-    if (command ~= "nd" and syncCommand ~= command) then
+local function findNewSpawn(deadPlayerIndex)
+    local playersOutSideMap = {}
+    for playerIndex = 1, 16 do
+        if (player_present(playerIndex) and playerIndex ~= deadPlayerIndex) then
+            local player = blam.biped(get_dynamic_player(playerIndex))
+            if (player) then
+                if (not player.isOutSideMap) then
+                    if (player.health > 0 and player.isOnGround) then
+                        local scenario = blam.scenario(0)
+                        if (scenario) then
+                            local playerName = get_var(playerIndex, "$name")
+                            local playerSpawns = scenario.spawnLocationList
+                            -- Update second player spawn point on the scenario
+                            -- Usually the first spawn point is for local/campaign purposes only
+                            if (blam.isNull(player.vehicleObjectId)) then
+                                say_all("Using " .. playerName .. " as a respawn point..")
+                                for spawnIndex, spawn in pairs(playerSpawns) do
+                                    playerSpawns[spawnIndex].x = player.x
+                                    playerSpawns[spawnIndex].y = player.y
+                                    playerSpawns[spawnIndex].z = player.z + 0.3
+                                end
+                            end
+                            -- Update player spawns list on the scenario
+                            scenario.spawnLocationList = playerSpawns
+                            break
+                        end
+                    end
+                else
+                    say_all("Player " .. playerIndex .. " is outside map!")
+                    glue.append(playersOutSideMap, playerIndex)
+                end
+            end
+        end
+    end
+    for _, playerIndex in pairs(playersOutSideMap) do
+        local player = blam.player(get_player(playerIndex))
+        if (player) then
+            delete_object(player.objectId)
+        end
+    end
+end
+
+function SyncHscCommands(_, command)
+    local bspIndex = tonumber(command)
+    if (bspIndex and currentBspIndex ~= bspIndex) then
+        -- TODO This does not works!
+        findNewSpawn()
+        currentBspIndex = bspIndex
+        console_out("New bsp index detected: " .. currentBspIndex)
+        broadcast("sync_switch_bsp " .. tonumber(currentBspIndex))
+        return false
+    elseif (command ~= "nd" and syncCommand ~= command) then
         syncCommand = command
         console_out(syncCommand)
         -- Check if the map is trying to get a player on a vehicle
@@ -99,6 +150,10 @@ function GetSyncCommand(_, command)
                         end
                     end
                 end
+            elseif (syncCommand:find("switch_bsp")) then
+                findNewSpawn()
+                currentBspIndex = tonumber(glue.string.split(command, " ")[2])
+                say_all("Saving new bsp index...")
             end
             broadcast(syncCommand)
         end
@@ -106,6 +161,7 @@ function GetSyncCommand(_, command)
         -- FIXME Improve testing on this
         execute_command([[set sync_hsc_command ""]])
     end
+    return
 end
 
 function CleanBipeds(strServerObjectId)
@@ -153,8 +209,8 @@ local function syncUpdateAI()
                                     end
                                 end
                             else
-                                --local updatePacket = core.updatePacket(serverObjectId, ai)
-                                --send(playerIndex, updatePacket)
+                                -- local updatePacket = core.updatePacket(serverObjectId, ai)
+                                -- send(playerIndex, updatePacket)
                             end
                         end
                     end
@@ -180,8 +236,12 @@ end
 
 function OnPlayerJoin(playerIndex)
     -- Set players on the same team for coop purposes
-    execute_script("st * red")
-    send(playerIndex, "disable_collision")
+    execute_script("st " .. playerIndex .. " red")
+    findNewSpawn(playerIndex)
+    send(playerIndex, "disable_biped_collision")
+    if (currentBspIndex) then
+        send(playerIndex, currentBspIndex)
+    end
     for objectId, tagId in pairs(aiList) do
         local spawnPacket = core.spawnPacket(tagId, objectId)
         send(playerIndex, spawnPacket)
@@ -191,46 +251,12 @@ end
 function OnPlayerDead(deadPlayerIndex)
     local deaths = 0
     local playersCount = tonumber(get_var(0, "$pn"))
-    for currentPlayerIndex = 1, 16 do
-        if (player_present(currentPlayerIndex) and currentPlayerIndex ~= deadPlayerIndex) then
-            local player = blam.biped(get_dynamic_player(currentPlayerIndex))
-            if (player and player.health > 0 and not player.isOutSideMap and player.isOnGround) then
-                local scenario = blam.scenario(0)
-                if (scenario) then
-                    local playerName = get_var(currentPlayerIndex, "$name")
-                    say_all("Using " .. playerName .. " as a respawn point..")
-                    local playerSpawns = scenario.spawnLocationList
-                    -- Update second player spawn point on the scenario
-                    -- Usually the first spawn point is for local/campaign purposes only
-                    -- So handle second player spawn point as a standard from now on
-                    if (blam.isNull(player.vehicleObjectId)) then
-                        for k,v in pairs(playerSpawns) do
-                            playerSpawns[k].x = player.x
-                            playerSpawns[k].y = player.y
-                            playerSpawns[k].z = player.z
-                        end
-                    else
-                        local vehicle = blam.object(get_object(player.vehicleObjectId))
-                        if (vehicle) then
-                            for k,v in pairs(playerSpawns) do
-                                playerSpawns[k].x = vehicle.x
-                                playerSpawns[k].y = vehicle.y
-                                playerSpawns[k].z = vehicle.z
-                            end
-                        end
-                    end
-                    -- Update player spawns list on the scenario
-                    scenario.spawnLocationList = playerSpawns
-                    break
-                end
-            end
-            -- FIXME Sometimes this events gets triggered when there is just one player alive
-            local playerDeaths = tonumber(get_var(currentPlayerIndex, "$deaths"))
-            if (playerDeaths > 0) then
-                deaths = deaths + 1
-            end
-        end
-    end
+    ---- FIXME Sometimes this events gets triggered when there is just one player alive
+    -- local playerDeaths = tonumber(get_var(deadPlayerIndex, "$deaths"))
+    -- if (playerDeaths > 0) then
+    --    deaths = deaths + 1
+    -- end
+    findNewSpawn(deadPlayerIndex)
     if (deaths == playersCount) then
         say_all("Game over, AI wins...")
         -- execute_script("sv_map_next")
@@ -256,6 +282,7 @@ function ResetState()
 end
 
 function OnGameStart()
+    -- Register available bipeds on the map
     for tagIndex = 0, blam.tagDataHeader.count - 1 do
         local tag = blam.getTag(tagIndex)
         if (tag and tag.class == blam.tagClasses.biped) then
@@ -269,7 +296,9 @@ end
 function OnCommand(playerIndex, command, environment)
     if (environment == 2) then
         if (command == "blist") then
-            glue.map(mapBipedTags, function(bipedName) rprint(playerIndex, bipedName) end)
+            glue.map(mapBipedTags, function(bipedName)
+                rprint(playerIndex, bipedName)
+            end)
             return false
         else
             for bipedName, bipedTag in pairs(mapBipedTags) do
@@ -286,7 +315,7 @@ function OnCommand(playerIndex, command, environment)
         end
     elseif (environment == 1) then
         if (command:find("mdis")) then
-            local data = glue.string.split(command:gsub('"', ""), " ")
+            local data = glue.string.split(command:gsub("\"", ""), " ")
             local newRadius = tonumber(data[2])
             if (newRadius) then
                 syncRadius = newRadius
@@ -294,7 +323,7 @@ function OnCommand(playerIndex, command, environment)
                 say_all("New mimic synchronization radius: " .. newRadius)
                 return false
             else
-                say_all("AI Count: " .. aiCount )
+                say_all("AI Count: " .. aiCount)
                 say_all("Mimic synchronization radius: " .. syncRadius)
                 return false
             end
@@ -303,12 +332,10 @@ function OnCommand(playerIndex, command, environment)
 end
 
 function OnTick()
-    for playerIndex = 1,16 do
+    execute_command("structure_bsp_index", 0, true)
+    for playerIndex = 1, 16 do
         if (player_present(playerIndex)) then
             local player = blam.biped(get_dynamic_player(playerIndex))
-            if (player) then
-                blam.bipedTag(player.tagId).disableCollision = true
-            end
         end
     end
 end
@@ -327,10 +354,10 @@ function OnScriptLoad()
     register_callback(cb["EVENT_OBJECT_SPAWN"], "OnObjectSpawn")
     register_callback(cb["EVENT_JOIN"], "OnPlayerJoin")
     register_callback(cb["EVENT_GAME_END"], "ResetState")
-    --register_callback(cb["EVENT_DIE"], "IncreaseHealth")
+    -- register_callback(cb["EVENT_DIE"], "IncreaseHealth")
     register_callback(cb["EVENT_TICK"], "OnTick")
     register_callback(cb["EVENT_DIE"], "OnPlayerDead")
-    register_callback(cb["EVENT_ECHO"], "GetSyncCommand")
+    register_callback(cb["EVENT_ECHO"], "SyncHscCommands")
     register_callback(cb["EVENT_GAME_START"], "OnGameStart")
     register_callback(cb["EVENT_COMMAND"], "OnCommand")
 end

@@ -1,5 +1,6 @@
 local glue = require "glue"
 local blam = require "blam"
+local color = require "ncolor"
 
 local core = {}
 local lastLog = ""
@@ -14,7 +15,7 @@ local concat = table.concat
 
 -- Mimic constants
 local spawnPacketTemplate = "@s,%s,%s"
-local updatePacketTemplate = "@u,%s,%s,%s,%s,%s,%s,%s,%s"
+local updatePacketTemplate = "@u,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s"
 local deletePacketTemplate = "@k,%s"
 
 function core.log(message, ...)
@@ -69,18 +70,23 @@ end
 ---@param biped biped
 ---@return string updatePacket
 function core.updatePacket(serverId, biped)
+    local invisible = 0
+    if (biped.invisible) then
+        invisible = 1
+    end
     if (blam.isNull(biped.vehicleObjectId)) then
+        
         return updatePacketTemplate:format(serverId, core.encode("f", biped.x),
                                            core.encode("f", biped.y), core.encode("f", biped.z),
                                            biped.animation, biped.animationFrame,
-                                           core.encode("f", biped.vX), core.encode("f", biped.vY))
+                                           core.encode("f", biped.vX), core.encode("f", biped.vY), color.decToHex(biped.redA, biped.greenA, biped.blueA), invisible)
     else
         local vehicle = blam.object(get_object(biped.vehicleObjectId))
         if (vehicle) then
             updatePacketTemplate:format(serverId, core.encode("f", vehicle.x),
                                         core.encode("f", vehicle.y), core.encode("f", vehicle.z),
                                         biped.animation, biped.animationFrame,
-                                        core.encode("f", biped.vX), core.encode("f", biped.vY))
+                                        core.encode("f", biped.vX), core.encode("f", biped.vY), color.decToHex(biped.redA, biped.greenA, biped.blueA), invisible)
         end
     end
 end
@@ -109,11 +115,11 @@ function core.objectIsNearTo(player, target, sensitivity)
     return false
 end
 
-function core.syncBiped(tagId, x, y, z, vX, vY, animation, animationFrame)
+function core.syncBiped(tagId, x, y, z, vX, vY, animation, animationFrame, r, g, b, invisible)
     local objectId = spawn_object(tagId, x, y, z)
     if (objectId) then
         dprint("Syncing biped...")
-        local biped = blam.object(get_object(objectId))
+        local biped = blam.biped(get_object(objectId))
         if (biped) then
             biped.x = x
             biped.y = y
@@ -124,6 +130,10 @@ function core.syncBiped(tagId, x, y, z, vX, vY, animation, animationFrame)
             biped.animationFrame = animationFrame
             biped.isNotDamageable = true
             biped.zVel = 0.00001
+            biped.redA = r
+            biped.greenA = g
+            biped.blueA = b
+            biped.invisible = invisible
             return objectId
         end
     else
@@ -132,9 +142,9 @@ function core.syncBiped(tagId, x, y, z, vX, vY, animation, animationFrame)
     return false
 end
 
-function core.updateBiped(objectId, x, y, z, vX, vY, animation, animationFrame)
+function core.updateBiped(objectId, x, y, z, vX, vY, animation, animationFrame, r, g, b, invisible)
     if (objectId) then
-        local biped = blam.object(get_object(objectId))
+        local biped = blam.biped(get_object(objectId))
         if (biped) then
             biped.x = x
             biped.y = y
@@ -146,6 +156,10 @@ function core.updateBiped(objectId, x, y, z, vX, vY, animation, animationFrame)
             biped.isNotDamageable = true
             biped.isHealthEmpty = false
             biped.zVel = 0.00001
+            biped.redA = r
+            biped.greenA = g
+            biped.blueA = b
+            biped.invisible = invisible
             return true
         end
     else

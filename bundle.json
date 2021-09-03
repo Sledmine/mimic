@@ -8,7 +8,8 @@
         "blam",
         "glue",
         "inspect",
-        "mimic.core"
+        "mimic.core",
+        "mimic.version"
     ],
     "main":"client/mimic_client",
     "output": "dist/mimic_client.lua"
