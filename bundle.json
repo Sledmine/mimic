@@ -9,7 +9,8 @@
         "glue",
         "inspect",
         "mimic.core",
-        "mimic.version"
+        "mimic.version",
+        "ncolor"
     ],
     "main":"client/mimic_client",
     "output": "dist/mimic_client.lua"

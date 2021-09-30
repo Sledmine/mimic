@@ -9,7 +9,8 @@
         "glue",
         "inspect",
         "blam",
-        "mimic.core"
+        "mimic.core",
+        "ncolor"
     ],
     "main": "server/mimic_server",
     "output": "dist/mimic_server.lua"

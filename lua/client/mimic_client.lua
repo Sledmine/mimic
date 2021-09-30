@@ -15,14 +15,14 @@ local glue = require "glue"
 local color = require "ncolor"
 
 -- Script setting variables (do not modify them manually)
-debugMode = false
+DebugMode = false
 local lastMapName
 local enableSync = false
 local asyncMode = false
 local disablePlayerCollision = false
 local bipedCleaner = true
-local bipedCleanerCycle = 30000
-local orphanBipedsSecondsThreshold = 2
+local bipedCleanerCycle = 20 * 1000 -- Milliseconds
+local orphanBipedsSecondsThreshold = 3
 
 -- State
 local queuePackets = {}
@@ -30,7 +30,7 @@ local aiList = {}
 local aiCollection = {}
 
 function dprint(message, ...)
-    if (debugMode) then
+    if (DebugMode) then
         if (...) then
             console_out(string.format(message, ...))
             return
@@ -76,9 +76,7 @@ function ProcessPacket(message, packetType, packet)
     local time = os.time()
     -- dprint("Packet %s size: %s", packetType, #message)
     if (packetType == "@s") then
-    -- TODO Add some kind of validation to prevent spamming this commands
-        dprint("Disabling client side projectiles...")
-        execute_script("allow_client_side_weapon_projectiles 0")
+        -- TODO Add some kind of validation to prevent spamming this commands
         execute_script("ai_erase_all")
         local tagId = tonumber(packet[2])
         local serverId = packet[3]
@@ -194,7 +192,7 @@ function OnTick()
                         Is alive (has more than 0 health)
                         Does not belongs to a player (it does not have player id)
                     ]]
-                    if (object.health > 0 and blam.isNull(object.playerId)) then
+                    if (object.health > 0 and blam.isNull(object.playerId) and blam.isNull(object.nameIndex)) then
                         -- Check if this object is already being synced
                         local serverBiped, serverBipedId = isSyncedBiped(object)
                         if (not serverBiped) then
@@ -208,7 +206,7 @@ function OnTick()
                             local currentTime = os.time()
                             local timeSinceLastUpdate = currentTime - serverBiped.lastUpdateAt
                             if (serverBiped.objectId and timeSinceLastUpdate > orphanBipedsSecondsThreshold) then
-                                dprint("Erasing orphan biped, last update at %s", serverBiped.lastUpdateAt)
+                                --dprint("Erasing orphan biped, last update at %s", serverBiped.lastUpdateAt)
                                 local biped = blam.biped(get_object(serverBiped.objectId))
                                 if (biped) then
                                     delete_object(serverBiped.objectId)
@@ -229,6 +227,17 @@ function OnTick()
             end
         end
     end
+end
+
+local function clientSideProjectiles(enable)
+    if (enable) then
+        dprint("ENABLING client side projectiles...")
+        execute_script("allow_client_side_weapon_projectiles 1")
+        return true
+    end
+    dprint("DISABLING client side projectiles...")
+    execute_script("allow_client_side_weapon_projectiles 0")
+    return false
 end
 
 function OnPacket(message)
@@ -260,13 +269,17 @@ function OnPacket(message)
     elseif (message == "enable_biped_collision") then
         disablePlayerCollision = false
         return false
+    elseif (message == "disable_client_side_projectiles") then
+        clientSideProjectiles(false)
+    elseif (message == "enable_client_side_weapon_projectiles") then
+        clientSideProjectiles(true)
     end
 end
 
 function OnCommand(command)
     if (command == "mdebug") then
-        debugMode = not debugMode
-        console_out("Debug mode: " .. tostring(debugMode))
+        DebugMode = not DebugMode
+        console_out("Debug mode: " .. tostring(DebugMode))
         return false
     elseif (command == "masync") then
         asyncMode = not asyncMode
@@ -293,9 +306,8 @@ end
 
 function OnUnload()
     if (ticks() > 0) then
-        dprint("Restoring client side projectiles...")
         disablePlayerCollision = false
-        execute_script("allow_client_side_weapon_projectiles 1")
+        clientSideProjectiles(true)
     end
 end
 

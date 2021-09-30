@@ -47,8 +47,15 @@ local addressList = {
     gamePaused = 0x004ACA79,
     gameOnMenus = 0x00622058,
     joystickInput = 0x64D998, -- from aLTis
-    firstPerson = 0x40000EB8 -- from aLTis
+    firstPerson = 0x40000EB8, -- from aLTis
+    objectTable = 0x400506B4,
+    deviceGroupsTable = 0x00816110
 }
+
+-- Server side addresses adjustment
+if (api_version or server_type == "sapp") then
+    addressList.deviceGroupsTable = 0x006E1C50
+end
 
 -- Tag classes values
 local tagClasses = {
@@ -880,6 +887,32 @@ end
 -- Object structures
 ------------------------------------------------------------------------------
 
+---@class dataTable
+---@field name string
+---@field maxElements number
+---@field elementSize number
+---@field capacity number
+---@field size number
+---@field nextElementId number
+---@field firstElementAddress number
+local dataTableStructure = {
+    name = {type = "string", offset = 0},
+    maxElements = {type = "word", offset = 0x20},
+    elementSize = {type = "word", offset = 0x22},
+    -- padding1 = {size = 0x0A, offset = 0x24},
+    capacity = {type = "word", offset = 0x2E},
+    size = {type = "word", offset = 0x30},
+    nextElementId = {type = "word", offset = 0x32},
+    firstElementAddress = {type = "dword", offset = 0x34}
+}
+
+local deviceGroupsTableStructure = {
+    name = {type = "string", offset = 0},
+    maxElements = {type = "word", offset = 0x20},
+    elementSize = {type = "word", offset = 0x22},
+    firstElementAddress = {type = "dword", offset = 0x34}
+}
+
 ---@class blamObject
 ---@field address number
 ---@field tagId number Object tag ID
@@ -950,7 +983,7 @@ local objectStructure = {
     isFrozen = {type = "bit", offset = 0x10, bitLevel = 20},
     -- FIXME Deprecated property, should be erased at a major release later
     frozen = {type = "bit", offset = 0x10, bitLevel = 20},
-    isOutSideMap = {type = "bit", offset = 0x10, bitLevel = 21},
+    isOutSideMap = {type = "bit", offset = 0x12, bitLevel = 5},
     isCollideable = {type = "bit", offset = 0x10, bitLevel = 24},
     model = {type = "dword", offset = 0x34},
     health = {type = "float", offset = 0xE0},
@@ -1028,6 +1061,7 @@ local objectStructure = {
 ---@field vehicleSeatIndex number Current vehicle seat index of this biped
 ---@field walkingState number Biped walking state, 0 = not walking, 1 = walking, 2 = stoping walking, 3 = stationary
 ---@field motionState number Biped motion state, 0 = standing , 1 = walking , 2 = jumping/falling
+---@field mostRecentDamagerPlayer number Id of the player that caused the most recent damage to this biped
 
 -- Biped structure (extends object structure)
 local bipedStructure = extendStructure(objectStructure, {
@@ -1059,7 +1093,8 @@ local bipedStructure = extendStructure(objectStructure, {
     bumpedObjectId = {type = "dword", offset = 0x4FC},
     vehicleSeatIndex = {type = "word", offset = 0x2F0},
     walkingState = {type = "char", offset = 0x503},
-    motionState = {type = "byte", offset = 0x4D2}
+    motionState = {type = "byte", offset = 0x4D2},
+    mostRecentDamagerPlayer = {type = "dword", offset = 0x43C}
 })
 
 -- Tag data header structure
@@ -1621,7 +1656,7 @@ local playerStructure = {
     kills = {type = "word", offset = 0x9C}
 }
 
----@class firstPersonInterface number
+---@class firstPersonInterface
 ---@field firstPersonHands number
 
 ---@class multiplayerInformation
@@ -1654,8 +1689,54 @@ local firstPersonStructure = {weaponObjectId = {type = "dword", offset = 0x10}}
 
 ---@class bipedTag
 ---@field disableCollision number Disable collision of this biped tag
-local bipedTagStructure = {
-    disableCollision = {type = "bit", offset = 0x2F4, bitLevel = 5}
+local bipedTagStructure = {disableCollision = {type = "bit", offset = 0x2F4, bitLevel = 5}}
+
+---@class  deviceMachine : blamObject
+---@field powerGroupIndex number Power index from the device groups table
+---@field power number Position amount of this device machine
+---@field powerChange number Power change of this device machine
+---@field positonGroupIndex number Power index from the device groups table
+---@field position number Position amount of this device machine
+---@field positionChange number Position change of this device machine
+local deviceMachineStructure = extendStructure(objectStructure, {
+    powerGroupIndex = {type = "word", offset = 0x1F8},
+    power = {type = "float", offset = 0x1FC},
+    powerChange = {type = "float", offset = 0x200},
+    positonGroupIndex = {type = "word", offset = 0x204},
+    position = {type = "float", offset = 0x208},
+    positionChange = {type = "float", offset = 0x20C}
+})
+
+---@class hudGlobals
+---@field anchor number
+---@field x number
+---@field y number
+---@field width number
+---@field height number
+---@field upTime number
+---@field fadeTime number
+---@field iconColorA number
+---@field iconColorR number
+---@field iconColorG number
+---@field iconColorB number
+---@field textSpacing number
+local hudGlobalsStructure = {
+    anchor = {type = "word", offset = 0x0},
+    x = {type = "word", offset = 0x24},
+    y = {type = "word", offset = 0x26},
+    width = {type = "float", offset = 0x28},
+    height = {type = "float", offset = 0x2C},
+    upTime = {type = "float", offset = 0x68},
+    fadeTime = {type = "float", offset = 0x6C},
+    iconColorA = {type = "float", offset = 0x70},
+    iconColorR = {type = "float", offset = 0x74},
+    iconColorG = {type = "float", offset = 0x78},
+    iconColorB = {type = "float", offset = 0x7C},
+    textColorA = {type = "float", offset = 0x80},
+    textColorR = {type = "float", offset = 0x84},
+    textColorG = {type = "float", offset = 0x88},
+    textColorB = {type = "float", offset = 0x8C},
+    textSpacing = {type = "float", offset = 0x90}
 }
 
 ------------------------------------------------------------------------------
@@ -1696,6 +1777,22 @@ function blam.isNull(value)
         return true
     end
     return false
+end
+
+function blam.isGameHost()
+    return server_type == "local"
+end
+
+function blam.isGameSinglePlayer()
+    return server_type == "none"
+end
+
+function blam.isGameDedicated()
+    return server_type == "dedicated"
+end
+
+function blam.isGameSAPP()
+    return server_type == "sapp"
 end
 
 --- Get the current game camera type
@@ -1841,6 +1938,17 @@ end
 function blam.biped(address)
     if (isValid(address)) then
         return createObject(address, bipedStructure)
+    end
+    return nil
+end
+
+--- Create a biped tag from a tag path or id
+---@param tag string | number
+---@return bipedTag
+function blam.bipedTag(tag)
+    if (isValid(tag)) then
+        local bipedTag = blam.getTag(tag, tagClasses.biped)
+        return createObject(bipedTag.data, bipedTagStructure)
     end
     return nil
 end
@@ -2004,13 +2112,79 @@ function blam.firstPerson(address)
     return createObject(address or addressList.firstPerson, firstPersonStructure)
 end
 
---- Create a biped tag from a tag path or id
+--- Create a Device Machine object from a given address
+---@param address number
+---@return deviceMachine
+function blam.deviceMachine(address)
+    if (isValid(address)) then
+        return createObject(address, deviceMachineStructure)
+    end
+    return nil
+end
+
+--- Create a HUD Globals tag object from a given address
 ---@param tag string | number
----@return bipedTag
-function blam.bipedTag(tag)
+---@return hudGlobals
+function blam.hudGlobals(tag)
     if (isValid(tag)) then
-        local bipedTag = blam.getTag(tag, tagClasses.biped)
-        return createObject(bipedTag.data, bipedTagStructure)
+        local hudGlobals = blam.getTag(tag, tagClasses.hudGlobals)
+        return createObject(hudGlobals.data, hudGlobalsStructure)
+    end
+    return nil
+end
+
+--- Return a blam object given object index or id
+---@param idOrIndex number
+---@return blamObject
+function blam.getObject(idOrIndex)
+    local objectId
+    local objectAddress
+
+    -- Get object address
+    if (idOrIndex) then
+        -- Get object ID
+        if (idOrIndex < 0xFFFF) then
+            local index = idOrIndex
+
+            -- Get objects table
+            local table = createObject(addressList.objectTable, dataTableStructure)
+            if (index > table.capacity) then
+                return nil
+            end
+
+            -- Calculate object ID (this may be invalid, be careful)
+            objectId =
+                (read_word(table.firstElementAddress + index * table.elementSize) * 0x10000) + index
+        else
+            objectId = idOrIndex
+        end
+
+        objectAddress = get_object(objectId)
+
+        return blam.object(objectAddress)
+    end
+    return nil
+end
+
+---@class deviceGroup
+---@field power number
+---@field position number
+
+--- Return a object
+---@param idOrIndex number
+---@return deviceGroup
+function blam.getDeviceGroup(index)
+    local power = 0
+    local position = 0
+
+    -- Get object address
+    if (index) then
+        -- Get objects table
+        local table = createObject(read_dword(addressList.deviceGroupsTable), deviceGroupsTableStructure)
+        -- Calculate object ID (this may be invalid, be careful)
+        local itemOffset = table.elementSize * index 
+        local item = read_float(table.firstElementAddress + itemOffset + 0x4)
+        return item
     end
     return nil
 end

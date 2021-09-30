@@ -19,7 +19,7 @@ local updatePacketTemplate = "@u,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s"
 local deletePacketTemplate = "@k,%s"
 
 function core.log(message, ...)
-    if (debugMode) then
+    if (DebugMode) then
         if (...) then
             local formattedMessage = string.format(message, ...)
             if (lastLog ~= formattedMessage) then
@@ -62,7 +62,7 @@ end
 ---@return string spawnPacket
 function core.spawnPacket(tagId, serverId)
     local tagIndex = core.getIndexById(tagId)
-    return spawnPacketTemplate:format(tagId, serverId)
+    return spawnPacketTemplate:format(tagIndex, serverId)
 end
 
 ---Create a packet string to spawn an AI
@@ -118,7 +118,6 @@ end
 function core.syncBiped(tagId, x, y, z, vX, vY, animation, animationFrame, r, g, b, invisible)
     local objectId = spawn_object(tagId, x, y, z)
     if (objectId) then
-        dprint("Syncing biped...")
         local biped = blam.biped(get_object(objectId))
         if (biped) then
             biped.x = x
@@ -187,6 +186,56 @@ function core.findTag(partialName, searchTagType)
         end
     end
     return nil
+end
+
+--- Normalize any map name or snake case name to a name with sentence case
+---@param name string
+function core.toSentenceCase(name)
+    return string.gsub(" " .. name:gsub("_", " "), "%W%l", string.upper):sub(2)
+end
+
+---@class vector3D
+---@field x number
+---@field y number
+---@field z number
+
+--- Covert euler into game rotation array, optional rotation matrix
+-- Based on https://www.mecademic.com/en/how-is-orientation-in-space-represented-with-euler-angles
+--- @param yaw number
+--- @param pitch number
+--- @param roll number
+--- @return vector3D, vector3D
+function core.eulerToRotation(yaw, pitch, roll)
+    local yaw = math.rad(yaw)
+    local pitch = math.rad(-pitch) -- Negative pitch due to Sapien handling anticlockwise pitch
+    local roll = math.rad(roll)
+    local matrix = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}
+
+    -- Roll, Pitch, Yaw = a, b, y
+    local cosA = math.cos(roll)
+    local sinA = math.sin(roll)
+    local cosB = math.cos(pitch)
+    local sinB = math.sin(pitch)
+    local cosY = math.cos(yaw)
+    local sinY = math.sin(yaw)
+
+    matrix[1][1] = cosB * cosY
+    matrix[1][2] = -cosB * sinY
+    matrix[1][3] = sinB
+    matrix[2][1] = cosA * sinY + sinA * sinB * cosY
+    matrix[2][2] = cosA * cosY - sinA * sinB * sinY
+    matrix[2][3] = -sinA * cosB
+    matrix[3][1] = sinA * sinY - cosA * sinB * cosY
+    matrix[3][2] = sinA * cosY + cosA * sinB * sinY
+    matrix[3][3] = cosA * cosB
+
+    local rollVector = {x = matrix[1][1], y = matrix[2][1], z = matrix[3][1]}
+    local yawVector = {x = matrix[1][3], y = matrix[2][3], z = matrix[3][3]}
+    return rollVector, yawVector, matrix
+end
+
+
+function core.eulerToRotation(matrix)
 end
 
 return core

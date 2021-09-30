@@ -27,7 +27,8 @@ delimited by a comma or a special char (comma by default).
 
 -- First parameter is the serverId of the biped object that the server is trying to sync
 -- Others parameter are the object coordinates
-"@u(2),serverId(8),objectX(10),objectY(10),objectZ(10),objectAnim(10)"
+"@u(2),serverIndex(4),objectX(10),objectY(10),objectZ(10),bipedAnimation(4),bipedAnimationFrame(3),yawX(10),yawY(10),colorA(6),invisible(1)"
+
 ```
 
 # Kill AI
