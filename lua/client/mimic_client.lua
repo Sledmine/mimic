@@ -7,11 +7,13 @@ clua_version = 2.056
 
 local blam = require "blam"
 objectClasses = blam.objectClasses
+tagClasses = blam.tagClasses
+local harmony = require "mods.harmony"
 local core = require "mimic.core"
 local scriptVersion = require "mimic.version"
 
-local inspect = require "inspect"
 local glue = require "glue"
+local split = glue.string.split
 local color = require "ncolor"
 
 -- Script setting variables (do not modify them manually)
@@ -23,11 +25,13 @@ local disablePlayerCollision = false
 local bipedCleaner = true
 local bipedCleanerCycle = 20 * 1000 -- Milliseconds
 local orphanBipedsSecondsThreshold = 3
+local gameStarted = false
 
 -- State
 local queuePackets = {}
 local aiList = {}
 local aiCollection = {}
+local availableBipeds = {}
 
 function dprint(message, ...)
     if (DebugMode) then
@@ -41,6 +45,8 @@ function dprint(message, ...)
 end
 
 function OnMapLoad()
+    gameStarted = false
+    CoopStarted = false
     queuePackets = {}
     aiList = {}
 end
@@ -82,8 +88,8 @@ function ProcessPacket(message, packetType, packet)
         local serverId = packet[3]
         aiList[serverId] = {
             tagId = tagId,
-            --objectId = nil,
-            --objectIndex = nil,
+            -- objectId = nil,
+            -- objectIndex = nil,
             -- TODO Add biped removal after a large amount of time without an update
             lastUpdateAt = time
         }
@@ -107,7 +113,8 @@ function ProcessPacket(message, packetType, packet)
             local tagId = data.tagId
             local objectId = data.objectId
             if (objectId) then
-                if (not core.updateBiped(objectId, x, y, z, vX, vY, animation, animationFrame, r, g, b, invisible)) then
+                if (not core.updateBiped(objectId, x, y, z, vX, vY, animation, animationFrame, r, g,
+                                         b, invisible)) then
                     core.log("Warning, server biped %s, &s update mismatch!", serverId, objectId)
                     aiList[serverId].objectId = core.syncBiped(tagId, x, y, z, vX, vY, animation,
                                                                animationFrame, r, g, b, invisible)
@@ -147,6 +154,10 @@ function ProcessPacket(message, packetType, packet)
                 CleanBipeds(serverId)
             end
         end
+    elseif (packetType == "@i") then
+        local votesLeft = packet[2]
+        local difficulty = packet[3]
+        core.updateCoopInfo(votesLeft, difficulty)
     end
     -- dprint("Packet processed, elapsed time: %.6f\n", os.clock() - time)
 end
@@ -165,7 +176,17 @@ local function isSyncedBiped(object)
     return nil
 end
 
+local function onGameStart()
+    gameStarted = true
+    if (map:find("coop")) then
+        availableBipeds = core.loadCoopMenu()
+    end
+end
+
 function OnTick()
+    if (not gameStarted) then
+        onGameStart()
+    end
     if (lastMapName ~= map) then
         lastMapName = map
         if (lastMapName == "ui") then
@@ -175,7 +196,7 @@ function OnTick()
         end
     end
     -- Start removing the server created bipeds only when the server aks for it
-    if (server_type == "dedicated") then
+    if (blam.isGameDedicated()) then
         if (disablePlayerCollision) then
             local player = blam.biped(get_dynamic_player())
             if (player) then
@@ -192,7 +213,8 @@ function OnTick()
                         Is alive (has more than 0 health)
                         Does not belongs to a player (it does not have player id)
                     ]]
-                    if (object.health > 0 and blam.isNull(object.playerId) and blam.isNull(object.nameIndex)) then
+                    if (object.health > 0 and blam.isNull(object.playerId) and
+                        blam.isNull(object.nameIndex)) then
                         -- Check if this object is already being synced
                         local serverBiped, serverBipedId = isSyncedBiped(object)
                         if (not serverBiped) then
@@ -205,8 +227,9 @@ function OnTick()
                         else
                             local currentTime = os.time()
                             local timeSinceLastUpdate = currentTime - serverBiped.lastUpdateAt
-                            if (serverBiped.objectId and timeSinceLastUpdate > orphanBipedsSecondsThreshold) then
-                                --dprint("Erasing orphan biped, last update at %s", serverBiped.lastUpdateAt)
+                            if (serverBiped.objectId and timeSinceLastUpdate >
+                                orphanBipedsSecondsThreshold) then
+                                -- dprint("Erasing orphan biped, last update at %s", serverBiped.lastUpdateAt)
                                 local biped = blam.biped(get_object(serverBiped.objectId))
                                 if (biped) then
                                     delete_object(serverBiped.objectId)
@@ -271,8 +294,13 @@ function OnPacket(message)
         return false
     elseif (message == "disable_client_side_projectiles") then
         clientSideProjectiles(false)
+        return false
     elseif (message == "enable_client_side_weapon_projectiles") then
         clientSideProjectiles(true)
+        return false
+    elseif (message == "open_coop_menu") then
+        availableBipeds = core.loadCoopMenu(true)
+        return false
     end
 end
 
@@ -301,7 +329,44 @@ function OnCommand(command)
     elseif (command == "mversion") then
         console_out(scriptVersion)
         return false
+    elseif (command == "mspawn") then
+        core.enableSpawns()
+        core.loadCoopMenu(true)
+        return false
     end
+end
+
+function OnMenuAccept(widgetTagId)
+    if (map:find("coop")) then
+        local widgetTag = blam.getTag(widgetTagId)
+        if (widgetTag) then
+            if (widgetTag.path:find("ready_button", 1, true)) then
+                local rconCommand = "rcon coup @r,1"
+                dprint(rconCommand)
+                execute_script(rconCommand)
+            elseif (widgetTag.path:find("biped_buttons", 1, true)) then
+                local tagSplit = split(widgetTag.path, "\\")
+                local buttonTagName = tagSplit[#tagSplit]
+                local desiredBipedIndex = tonumber(split(buttonTagName, "biped_")[2])
+                if (blam.isGameDedicated()) then
+                    local rconCommand = "rcon coup @b," .. availableBipeds[desiredBipedIndex].id
+                    dprint(rconCommand)
+                    execute_script(rconCommand)
+                else
+                    local globals = blam.globalsTag()
+                    if (globals) then
+                        local player = blam.player(get_player())
+                        local mpInfo = globals.multiplayerInformation
+                        mpInfo[1].unit = core.loadCoopMenu(false)[desiredBipedIndex].id
+                        console_out("Replacing biped...")
+                        globals.multiplayerInformation = mpInfo
+                        delete_object(player.objectId)
+                    end
+                end
+            end
+        end
+    end
+    return true
 end
 
 function OnUnload()
@@ -309,6 +374,7 @@ function OnUnload()
         disablePlayerCollision = false
         clientSideProjectiles(true)
     end
+    harmony.unload()
 end
 
 set_callback("map load", "OnMapLoad")
@@ -316,3 +382,4 @@ set_callback("unload", "OnUnload")
 set_callback("command", "OnCommand")
 set_callback("tick", "OnTick")
 set_callback("rcon message", "OnPacket")
+harmony.set_callback("menu accept", "OnMenuAccept")

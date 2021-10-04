@@ -1,9 +1,11 @@
 local glue = require "glue"
+local split = glue.string.split
 local blam = require "blam"
 local color = require "ncolor"
 
 local core = {}
 local lastLog = ""
+local difficulties = {"Easy", "Normal", "Heroic", "Legendary"}
 
 local concat = table.concat
 
@@ -75,18 +77,22 @@ function core.updatePacket(serverId, biped)
         invisible = 1
     end
     if (blam.isNull(biped.vehicleObjectId)) then
-        
+
         return updatePacketTemplate:format(serverId, core.encode("f", biped.x),
                                            core.encode("f", biped.y), core.encode("f", biped.z),
                                            biped.animation, biped.animationFrame,
-                                           core.encode("f", biped.vX), core.encode("f", biped.vY), color.decToHex(biped.redA, biped.greenA, biped.blueA), invisible)
+                                           core.encode("f", biped.vX), core.encode("f", biped.vY),
+                                           color.decToHex(biped.redA, biped.greenA, biped.blueA),
+                                           invisible)
     else
         local vehicle = blam.object(get_object(biped.vehicleObjectId))
         if (vehicle) then
             updatePacketTemplate:format(serverId, core.encode("f", vehicle.x),
                                         core.encode("f", vehicle.y), core.encode("f", vehicle.z),
                                         biped.animation, biped.animationFrame,
-                                        core.encode("f", biped.vX), core.encode("f", biped.vY), color.decToHex(biped.redA, biped.greenA, biped.blueA), invisible)
+                                        core.encode("f", biped.vX), core.encode("f", biped.vY),
+                                        color.decToHex(biped.redA, biped.greenA, biped.blueA),
+                                        invisible)
         end
     end
 end
@@ -98,6 +104,10 @@ end
 function core.positionPacket(player)
     return ("%s,%s,%s,%s"):format("@p", core.encode("f", player.xVel),
                                   core.encode("f", player.yVel), core.encode("f", player.zVel))
+end
+
+function core.infoPacket(votesLeft, difficulty)
+    return concat({"@i", votesLeft, difficulty}, ",")
 end
 
 --- Check if player is near by to an object
@@ -234,8 +244,112 @@ function core.eulerToRotation(yaw, pitch, roll)
     return rollVector, yawVector, matrix
 end
 
-
 function core.eulerToRotation(matrix)
+end
+
+--- Find the path, index and id of a list of tags given partial name and tag type
+---@param partialName string
+---@param searchTagType string
+---@return tag[] tag
+function core.findTagsList(partialName, searchTagType)
+    local tagsList
+    for tagIndex = 0, blam.tagDataHeader.count - 1 do
+        local tag = blam.getTag(tagIndex)
+        if (tag and tag.path:find(partialName) and tag.class == searchTagType) then
+            if (not tagsList) then
+                tagsList = {}
+            end
+            glue.append(tagsList, {
+                id = tag.id,
+                path = tag.path,
+                index = tag.index,
+                class = tag.class,
+                indexed = tag.indexed,
+                data = tag.data
+            })
+        end
+    end
+    return tagsList
+end
+
+function core.loadCoopMenu(open)
+    local coopMenuTag = core.findTag("coop_menu_screen", tagClasses.uiWidgetDefinition)
+    local bipedsListTag = core.findTag("coop_menu\\strings\\buttons", tagClasses.unicodeStringList)
+    if (coopMenuTag and bipedsListTag) then
+        local bipedTags = core.findTagsList("_mp", tagClasses.biped)
+        local bipedsList = blam.unicodeStringList(bipedsListTag.id)
+        local newBipeds = bipedsList.stringList
+        for index, tag in pairs(bipedTags) do
+            local tagPath = tag.path
+            local tagSplit = split(tagPath, "\\")
+            local bipedName = tagSplit[#tagSplit]:gsub("_mp", ""):gsub("_", " "):upper()
+            newBipeds[index + 1] = bipedName
+        end
+        bipedsList.stringList = newBipeds
+        if (open) then
+            load_ui_widget(coopMenuTag.path)
+        end
+        return bipedTags
+    end
+end
+
+function core.updateCoopInfo(newVotes, difficulty)
+    local votesStringsTag = core.findTag("coop_menu\\strings\\votes", tagClasses.unicodeStringList)
+    local difficultiesTag = core.findTag("game_difficulties", tagClasses.bitmap)
+    if (votesStringsTag and difficultiesTag) then
+        local votesStrings = blam.unicodeStringList(votesStringsTag.id)
+        local newStringVotes = votesStrings.stringList
+        newStringVotes[1] = tostring(newVotes)
+        votesStrings.stringList = newStringVotes
+        local difficultyBitmap = blam.bitmap(difficultiesTag.id)
+        local newSequences = difficultyBitmap.sequences
+        newSequences[1].firstBitmapIndex = difficulty - 1
+        difficultyBitmap.sequences = newSequences
+    end
+end
+
+function core.getRequiredVotes()
+    if (DebugMode) then
+        return 1
+    end
+    local playersCount = tonumber(get_var(0, "$pn"))
+    local requiredVotes = playersCount
+    if (playersCount > 5) then
+        requiredVotes = glue.floor(playersCount / 2)
+    end
+    return requiredVotes
+end
+
+function core.enableSpawns()
+    local scenario = blam.scenario(0)
+    if (scenario) then
+        local playerSpawns = scenario.spawnLocationList
+        --for spawnIndex in pairs(playerSpawns) do
+        --    playerSpawns[spawnIndex].type = 12
+        --end
+        playerSpawns[1].type = 12
+        scenario.spawnLocationList = playerSpawns
+    end
+end
+
+function core.registerVote(playerIndex)
+    if (not CoopStarted) then
+        local playerName = get_var(playerIndex, "$name")
+        local requiredVotes = core.getRequiredVotes()
+        VotesList[playerIndex] = true
+        local votesCount = #glue.keys(VotesList)
+        local remainingVotes = requiredVotes - votesCount
+        say_all(playerName .. " is ready for coop! (" .. votesCount .. " / " .. requiredVotes .. ")")
+        if (votesCount >= requiredVotes) then
+            CoopStarted = true
+            local currentMapName = get_var(0, "$map")
+            local splitName = glue.string.split(currentMapName, "_")
+            local baseNoCoopName = splitName[1]
+            core.enableSpawns()
+            execute_script("wake main_" .. baseNoCoopName)
+        end
+        return remainingVotes
+    end
 end
 
 return core

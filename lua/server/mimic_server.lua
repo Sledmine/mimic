@@ -28,10 +28,13 @@ local core = require "mimic.core"
 local toSentenceCase = core.toSentenceCase
 
 -- Settings
-DebugMode = true
-local syncRadius = 20
+DebugMode = false
+local syncRadius = 30
 local syncRate = 120
 local bspIndexAddress = 0x40002CD8
+local passwordAddress
+local failMessageAddress
+local serverRcon
 
 -- State
 local aiList = {}
@@ -41,10 +44,10 @@ local customPlayerBipeds = {}
 local vehiclesList = {}
 local deviceMachinesList = {}
 local isGameOnCinematic = false
-local allowCustomBipeds = false
+local allowCustomBipeds = true
 local aiCount = 0
-local votesList = {}
-local coopStarted = false
+VotesList = {}
+CoopStarted = false
 local syncCmd = ""
 local currentBspIndex
 
@@ -87,7 +90,7 @@ local function findNewSpawn(deadPlayerIndex)
                                     for spawnIndex, spawn in pairs(playerSpawns) do
                                         playerSpawns[spawnIndex].x = player.x
                                         playerSpawns[spawnIndex].y = player.y
-                                        playerSpawns[spawnIndex].z = player.z + 0.2
+                                        playerSpawns[spawnIndex].z = player.z + 0.3
                                     end
                                 else
                                     local vehicle = blam.object(get_object(player.vehicleObjectId))
@@ -96,7 +99,7 @@ local function findNewSpawn(deadPlayerIndex)
                                         for spawnIndex, spawn in pairs(playerSpawns) do
                                             playerSpawns[spawnIndex].x = vehicle.x
                                             playerSpawns[spawnIndex].y = vehicle.y
-                                            playerSpawns[spawnIndex].z = vehicle.z + 0.2
+                                            playerSpawns[spawnIndex].z = vehicle.z + 0.3
                                         end
                                     end
                                 end
@@ -115,7 +118,7 @@ local function findNewSpawn(deadPlayerIndex)
             say_all("No respawn candidate was found!")
         end
     else
-        --say_all("Game is on cinematic, respawn will not be updated!")
+        -- say_all("Game is on cinematic, respawn will not be updated!")
     end
     return true
 end
@@ -162,7 +165,7 @@ function SyncHSC(_, sHscCmd)
                     end
                 end
             end
-        -- elseif (syncCommand:find("switch_bsp")) then
+            -- elseif (syncCommand:find("switch_bsp")) then
             -- Deprecating this as there is a new bsp sync feature OnTick
             -- findNewSpawn()
             -- currentBspIndex = tonumber(glue.string.split(command, " ")[2])
@@ -301,16 +304,27 @@ function OnPlayerPreSpawn(playerIndex)
     timer(30, "SyncAITags", playerIndex)
 end
 
+function SyncState(playerIndex)
+    broadcast("@i," .. core.getRequiredVotes() .. ",4")
+    if (not CoopStarted) then
+        send(playerIndex, "sync_camera_control 1")
+        send(playerIndex, "sync_camera_set insertion_1a 0")
+        send(playerIndex, "sync_camera_set index_drop_1a 0")
+        send(playerIndex, "open_coop_menu")
+    end
+end
+
 function OnPlayerJoin(playerIndex)
     -- Set players on the same team for coop purposes
     execute_script("st " .. playerIndex .. " red")
+    timer(30, "SyncState", playerIndex)
 end
 
 function OnPlayerLeave(playerIndex)
-    votesList[playerIndex] = nil
-    if (allowCustomBipeds) then
-        customPlayerBipeds[playerIndex] = nil
-    end
+    VotesList[playerIndex] = nil
+    --if (allowCustomBipeds) then
+    --    customPlayerBipeds[playerIndex] = nil
+    --end
     findNewSpawn(playerIndex)
 end
 
@@ -345,7 +359,7 @@ function ResetState()
     vehiclesList = {}
     mapBipedTags = {}
     customPlayerBipeds = {}
-    votesList = {}
+    VotesList = {}
 end
 
 function OnGameStart()
@@ -361,87 +375,64 @@ function OnGameStart()
     end
 end
 
-function OnCommand(playerIndex, command, environment)
-    local playerName = get_var(playerIndex, "$name")
+function OnCommand(playerIndex, command, environment, rconPassword)
     local playerAdminLevel = tonumber(get_var(playerIndex, "$lvl"))
-    if (environment == 2) then
-        if (command == "blist") then
-            glue.map(mapBipedTags, function(bipedName)
-                rprint(playerIndex, bipedName)
-            end)
+    if (environment == 1) then
+        if (rconPassword == "coup") then
+            if (command:find("@")) then
+                local data = split(command, ",")
+                local packetType = data[1]
+                if (packetType == "@r") then
+                    if (not CoopStarted) then
+                        broadcast(core.infoPacket(core.registerVote(playerIndex), 4))
+                    end
+                    return false
+                elseif (packetType == "@b") then
+                    if (allowCustomBipeds) then
+                        local desiredBipedTagId = tonumber(data[2])
+                        for bipedName, bipedTag in pairs(mapBipedTags) do
+                            if (bipedTag.id == desiredBipedTagId) then
+                                send(playerIndex, "New biped selected!")
+                                customPlayerBipeds[playerIndex] = bipedTag
+                                local player = blam.player(get_player(playerIndex))
+                                local playerBiped = blam.biped(get_object(player.objectId))
+                                if (playerBiped) then
+                                    delete_object(player.objectId)
+                                end
+                                return false
+                            end
+                        end
+                    else
+                        send(playerIndex, "Custom bipeds are not allowed!")
+                    end
+                    return false
+                end
+            end
+            execute_script("sv_kick " .. playerIndex)
             return false
-        elseif (command == "ready" or command == "rdy") then
-            if (not coopStarted) then
-                local playersCount = tonumber(get_var(0, "$pn"))
-                local requiredVotes = 2
-                if (playersCount > 2) then
-                    requiredVotes = glue.floor(playersCount / 2)
+        end
+        if (playerAdminLevel == 4) then
+            if (command:find("mdis")) then
+                local data = split(command:gsub("\"", ""), " ")
+                local newRadius = tonumber(data[2])
+                if (newRadius) then
+                    syncRadius = newRadius
                 end
-                votesList[playerIndex] = true
-                local votesCount = #glue.keys(votesList)
-                say_all(playerName .. " is ready for coop! (" .. votesCount .. " / " ..
-                            requiredVotes .. ")")
-                if (votesCount >= requiredVotes) then
-                    coopStarted = true
-                    local currentMapName = get_var(0, "$map")
-                    local splitName = glue.string.split(currentMapName, "_")
-                    local baseNoCoopName = splitName[1]
-                    execute_script("wake main_" .. baseNoCoopName)
+                say_all("AI Count: " .. aiCount)
+                say_all("Mimic synchronization radius: " .. syncRadius)
+                return false
+            elseif (command:find("mrate")) then
+                local data = split(command:gsub("\"", ""), " ")
+                local newRate = tonumber(data[2])
+                if (newRate) then
+                    syncRate = newRate
                 end
+                say_all("Mimic synchronization rate: " .. syncRate)
+                return false
+            elseif (command:find("mspawn")) then
+                findNewSpawn()
                 return false
             end
-        else
-            if (allowCustomBipeds) then
-                for bipedName, bipedTag in pairs(mapBipedTags) do
-                    if (command == bipedName) then
-                        customPlayerBipeds[playerIndex] = bipedTag
-                        local player = blam.player(get_player(playerIndex))
-                        local playerBiped = blam.biped(get_object(player.objectId))
-                        if (playerBiped) then
-                            delete_object(player.objectId)
-                        end
-                        return false
-                    end
-                end
-            end
-        end
-    elseif (environment == 0 or playerAdminLevel == 4) then
-        if (command:find("mdis")) then
-            local data = glue.string.split(command:gsub("\"", ""), " ")
-            local newRadius = tonumber(data[2])
-            if (newRadius) then
-                syncRadius = newRadius
-            end
-            say_all("AI Count: " .. aiCount)
-            say_all("Mimic synchronization radius: " .. syncRadius)
-            return false
-        elseif (command:find("mrate")) then
-            local data = glue.string.split(command:gsub("\"", ""), " ")
-            local newRate = tonumber(data[2])
-            if (newRate) then
-                syncRate = newRate
-            end
-            say_all("Mimic synchronization rate: " .. syncRate)
-            return false
-        elseif (command:find("mspawn")) then
-            findNewSpawn()
-            return false
-        elseif (command:find("mbipeds")) then
-            local data = glue.string.split(command:gsub("\"", ""), " ")
-            local desiredBiped = data[2]
-            for currentPlayerIndex = 1, 16 do
-                for bipedName, bipedTag in pairs(mapBipedTags) do
-                    if (desiredBiped == bipedName) then
-                        customPlayerBipeds[currentPlayerIndex] = bipedTag
-                        local player = blam.player(get_player(currentPlayerIndex))
-                        if (player) then
-                            delete_object(player.objectId)
-                        end
-                        break
-                    end
-                end
-            end
-            return false
         end
     end
 end
@@ -498,11 +489,28 @@ end
 
 -- Put initialization code here
 function OnScriptLoad()
+    passwordAddress = read_dword(sig_scan("7740BA??????008D9B000000008A01") + 0x3)
+    failMessageAddress = read_dword(sig_scan("B8????????E8??000000A1????????55") + 0x1)
+    if (passwordAddress and failMessageAddress) then
+        -- Remove "rcon command failure" message
+        safe_write(true)
+        write_byte(failMessageAddress, 0x0)
+        safe_write(false)
+        -- Read current rcon in the server
+        serverRcon = read_string(passwordAddress)
+        if (serverRcon) then
+            cprint("Server rcon password is: \"" .. serverRcon .. "\"")
+        else
+            cprint("Error, at getting server rcon, please set and enable rcon on the server.")
+        end
+    else
+        cprint("Error, at obtaining rcon patches, please check SAPP version.")
+    end
     ResetState()
     -- Set hsc callback to follow actions requesting synchronization
     harmonySapp.set_hs_globals_set_callback(hscSetCallback)
     -- Netcode does not sync AI projectiles, force it with this
-    --execute_script("allow_client_side_weapon_projectiles 0")
+    -- execute_script("allow_client_side_weapon_projectiles 0")
     -- Start syncing AI every amount of seconds
     SyncUpdateAI = syncUpdateAI
     FindNewSpawn = findNewSpawn
@@ -548,6 +556,12 @@ end
 
 -- Cleanup
 function OnScriptUnload()
+    if (failMessageAddress) then
+        -- Restore "rcon command failure" message
+        safe_write(true)
+        write_byte(rcon.failMessageAddress, 0x72)
+        safe_write(false)
+    end
 end
 
 -- Log traceback for debug purposes
