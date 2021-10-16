@@ -9,6 +9,8 @@
         "glue",
         "inspect",
         "mimic.core",
+        "mimic.coop",
+        "mimic.hsc",
         "mimic.version",
         "ncolor"
     ],

@@ -10,6 +10,8 @@
         "inspect",
         "blam",
         "mimic.core",
+        "mimic.coop",
+        "mimic.hsc",
         "ncolor"
     ],
     "main": "server/mimic_server",

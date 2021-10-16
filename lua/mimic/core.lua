@@ -1,24 +1,27 @@
 local glue = require "glue"
 local split = glue.string.split
+local tohex = glue.string.tohex
+local fromhex = glue.string.fromhex
+local append = glue.append
+
 local blam = require "blam"
 local color = require "ncolor"
 
+local strpack = string.pack
+local strunpack = string.unpack
+local concat = table.concat
+
+local hsc = require "mimic.hsc"
+
 local core = {}
 local lastLog = ""
-local difficulties = {"Easy", "Normal", "Heroic", "Legendary"}
-
-local concat = table.concat
+local packetSeparator = ","
 
 ---@class aiData
 ---@field tagId number
 ---@field objectId number
 ---@field objectIndex number
 ---@field timeSinceLastUpdate number
-
--- Mimic constants
-local spawnPacketTemplate = "@s,%s,%s"
-local updatePacketTemplate = "@u,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s"
-local deletePacketTemplate = "@k,%s"
 
 function core.log(message, ...)
     if (DebugMode) then
@@ -39,11 +42,12 @@ function core.log(message, ...)
 end
 
 function core.encode(format, value)
-    return glue.string.tohex(string.pack(format, value))
+    return tohex(strpack(format, value))
 end
+local encode = core.encode
 
 function core.decode(format, value)
-    return string.unpack(format, glue.string.fromhex(value))
+    return strunpack(format, fromhex(value))
 end
 
 --- Get index value from an id value type
@@ -64,7 +68,7 @@ end
 ---@return string spawnPacket
 function core.spawnPacket(tagId, serverId)
     local tagIndex = core.getIndexById(tagId)
-    return spawnPacketTemplate:format(tagIndex, serverId)
+    return concat({"@s", tagIndex, serverId}, packetSeparator)
 end
 
 ---Create a packet string to spawn an AI
@@ -77,37 +81,54 @@ function core.updatePacket(serverId, biped)
         invisible = 1
     end
     if (blam.isNull(biped.vehicleObjectId)) then
-
-        return updatePacketTemplate:format(serverId, core.encode("f", biped.x),
-                                           core.encode("f", biped.y), core.encode("f", biped.z),
-                                           biped.animation, biped.animationFrame,
-                                           core.encode("f", biped.vX), core.encode("f", biped.vY),
-                                           color.decToHex(biped.redA, biped.greenA, biped.blueA),
-                                           invisible)
+        return concat({
+            "@u",
+            serverId,
+            encode("f", biped.x),
+            encode("f", biped.y),
+            encode("f", biped.z),
+            biped.animation,
+            biped.animationFrame,
+            encode("f", biped.vX),
+            encode("f", biped.vY),
+            color.decToHex(biped.redA, biped.greenA, biped.blueA),
+            invisible
+        }, packetSeparator)
     else
         local vehicle = blam.object(get_object(biped.vehicleObjectId))
         if (vehicle) then
-            updatePacketTemplate:format(serverId, core.encode("f", vehicle.x),
-                                        core.encode("f", vehicle.y), core.encode("f", vehicle.z),
-                                        biped.animation, biped.animationFrame,
-                                        core.encode("f", biped.vX), core.encode("f", biped.vY),
-                                        color.decToHex(biped.redA, biped.greenA, biped.blueA),
-                                        invisible)
+            concat({
+                "@u",
+                serverId,
+                encode("f", vehicle.x),
+                encode("f", vehicle.y),
+                encode("f", vehicle.z),
+                biped.animation,
+                biped.animationFrame,
+                encode("f", biped.vX),
+                encode("f", biped.vY),
+                color.decToHex(biped.redA, biped.greenA, biped.blueA),
+                invisible
+            }, packetSeparator)
         end
     end
 end
 
 function core.deletePacket(serverId)
-    return deletePacketTemplate:format(serverId)
+    return concat({"@k", serverId}, packetSeparator)
 end
 
 function core.positionPacket(player)
-    return ("%s,%s,%s,%s"):format("@p", core.encode("f", player.xVel),
-                                  core.encode("f", player.yVel), core.encode("f", player.zVel))
+    return concat({
+        "@p",
+        encode("f", player.xVel),
+        encode("f", player.yVel),
+        encode("f", player.zVel)
+    }, packetSeparator)
 end
 
 function core.infoPacket(votesLeft, difficulty)
-    return concat({"@i", votesLeft, difficulty}, ",")
+    return concat({"@i", votesLeft, difficulty}, packetSeparator)
 end
 
 --- Check if player is near by to an object
@@ -259,97 +280,100 @@ function core.findTagsList(partialName, searchTagType)
             if (not tagsList) then
                 tagsList = {}
             end
-            glue.append(tagsList, {
+            tagsList[#tagsList + 1] = {
                 id = tag.id,
                 path = tag.path,
                 index = tag.index,
                 class = tag.class,
                 indexed = tag.indexed,
                 data = tag.data
-            })
+            }
         end
     end
     return tagsList
 end
 
-function core.loadCoopMenu(open)
-    local coopMenuTag = core.findTag("coop_menu_screen", tagClasses.uiWidgetDefinition)
-    local bipedsListTag = core.findTag("coop_menu\\strings\\buttons", tagClasses.unicodeStringList)
-    if (coopMenuTag and bipedsListTag) then
-        local bipedTags = core.findTagsList("_mp", tagClasses.biped)
-        local bipedsList = blam.unicodeStringList(bipedsListTag.id)
-        local newBipeds = bipedsList.stringList
-        for index, tag in pairs(bipedTags) do
-            local tagPath = tag.path
-            local tagSplit = split(tagPath, "\\")
-            local bipedName = tagSplit[#tagSplit]:gsub("_mp", ""):gsub("_", " "):upper()
-            newBipeds[index + 1] = bipedName
+function core.adaptHSC(command)
+    -- Check if the map is trying to get a player on a vehicle
+    if (command:find("unit_enter_vehicle") and command:find("player")) then
+        local params = split(command, " ")
+        local unitName = params[2]
+        -- local playerIndex = to_player_index(tonumber(params[2], 10))
+        local playerIndex = to_player_index(tonumber(unitName:gsub("player", ""), 10))
+        local objectName = params[3]
+        local seatIndex = tonumber(params[4], 10)
+        for vehicleObjectId, vehicleTagId in pairs(VehiclesList) do
+            local vehicle = blam.object(get_object(vehicleObjectId))
+            if (vehicle and (not blam.isNull(vehicle.nameIndex))) then
+                local scenario = blam.scenario(0)
+                local objectScenarioName = scenario.objectNames[vehicle.nameIndex + 1]
+                if (objectName == objectScenarioName) then
+                    if (player_present(playerIndex)) then
+                        console_out(playerIndex)
+                        console_out(objectName)
+                        console_out(seatIndex)
+                        enter_vehicle(vehicleObjectId, playerIndex, seatIndex)
+                    end
+                end
+            end
         end
-        bipedsList.stringList = newBipeds
-        if (open) then
-            load_ui_widget(coopMenuTag.path)
+        return
+    elseif (command:find("object_create")) then
+        -- Prevent client object creation only if server creates a non biped/vehicle object
+        local params = split(command, " ")
+        local objectName = params[2]
+        for vehicleObjectId, vehicleTagId in pairs(VehiclesList) do
+            local vehicle = blam.object(get_object(vehicleObjectId))
+            if (vehicle and (not blam.isNull(vehicle.nameIndex))) then
+                local scenario = blam.scenario(0)
+                local objectScenarioName = scenario.objectNames[vehicle.nameIndex + 1]
+                if (objectName == objectScenarioName) then
+                    return
+                end
+            end
         end
-        return bipedTags
-    end
-end
-
-function core.updateCoopInfo(newVotes, difficulty)
-    local votesStringsTag = core.findTag("coop_menu\\strings\\votes", tagClasses.unicodeStringList)
-    local difficultiesTag = core.findTag("game_difficulties", tagClasses.bitmap)
-    if (votesStringsTag and difficultiesTag) then
-        local votesStrings = blam.unicodeStringList(votesStringsTag.id)
-        local newStringVotes = votesStrings.stringList
-        newStringVotes[1] = tostring(newVotes)
-        votesStrings.stringList = newStringVotes
-        local difficultyBitmap = blam.bitmap(difficultiesTag.id)
-        local newSequences = difficultyBitmap.sequences
-        newSequences[1].firstBitmapIndex = difficulty - 1
-        difficultyBitmap.sequences = newSequences
-    end
-end
-
-function core.getRequiredVotes()
-    if (DebugMode) then
-        return 1
-    end
-    local playersCount = tonumber(get_var(0, "$pn"))
-    local requiredVotes = playersCount
-    if (playersCount > 5) then
-        requiredVotes = glue.floor(playersCount / 2)
-    end
-    return requiredVotes
-end
-
-function core.enableSpawns()
-    local scenario = blam.scenario(0)
-    if (scenario) then
-        local playerSpawns = scenario.spawnLocationList
-        --for spawnIndex in pairs(playerSpawns) do
-        --    playerSpawns[spawnIndex].type = 12
-        --end
-        playerSpawns[1].type = 12
-        scenario.spawnLocationList = playerSpawns
-    end
-end
-
-function core.registerVote(playerIndex)
-    if (not CoopStarted) then
-        local playerName = get_var(playerIndex, "$name")
-        local requiredVotes = core.getRequiredVotes()
-        VotesList[playerIndex] = true
-        local votesCount = #glue.keys(VotesList)
-        local remainingVotes = requiredVotes - votesCount
-        say_all(playerName .. " is ready for coop! (" .. votesCount .. " / " .. requiredVotes .. ")")
-        if (votesCount >= requiredVotes) then
-            CoopStarted = true
-            local currentMapName = get_var(0, "$map")
-            local splitName = glue.string.split(currentMapName, "_")
-            local baseNoCoopName = splitName[1]
-            core.enableSpawns()
-            execute_script("wake main_" .. baseNoCoopName)
+    elseif (command:find("object_teleport") and command:find("player")) then
+        -- Cancel object teleport on client to prevent desync
+        return
+    elseif (command:find("nav_point")) then
+        -- FIXME This is not working for some reason
+        for playerIndex = 0, 15 do
+            Broadcast(command:gsub("player0", "player" .. playerIndex))
         end
-        return remainingVotes
+        return
+    elseif (command:find("camera_control")) then
+        -- TODO Add cinematic_start and cinematic_stop for accurate cinematic determination
+        local params = split(command, " ")
+        IsGameOnCinematic = params[2] == "true"
+        if (IsGameOnCinematic) then
+            say_all("Warning, game is on cinematic!")
+        else
+            say_all("Done, cinematic has ended!")
+        end
+    else
+        for actionName, action in pairs(hsc) do
+            if (command:find(actionName .. " ")) then
+                local params = split(command, " ")
+                local syncCommand = {action.packetType}
+                for argumentIndex, arg in pairs(action.arguments) do
+                    local sourceValue = params[argumentIndex + 1]
+                    if (sourceValue) then
+                        sourceValue = tostring(sourceValue):gsub("'", "")
+                        if (arg.value and arg.class) then
+                            -- console_out(sourceValue)
+                            sourceValue = tostring(blam.getTag(sourceValue, arg.class).id)
+                        end
+                        append(syncCommand, sourceValue)
+                    end
+                end
+                local outputCommand = concat(syncCommand, ",")
+                console_out(outputCommand)
+                Broadcast(outputCommand)
+                return
+            end
+        end
     end
+    return command
 end
 
 return core

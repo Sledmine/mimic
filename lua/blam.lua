@@ -3,7 +3,7 @@
 -- Sledmine, JerryBrick
 -- Improves memory handle and provides standard functions for scripting
 ------------------------------------------------------------------------------
-local blam = {_VERSION = "1.4.0-beta"}
+local blam = {_VERSION = "1.4.0"}
 
 ------------------------------------------------------------------------------
 -- Useful functions for internal usage
@@ -959,7 +959,6 @@ local deviceGroupsTableStructure = {
 ---@field animation number Current animation index
 ---@field animationFrame number Current animation frame
 ---@field isNotDamageable boolean Make the object undamageable
----@field vehicleObjectId number Current vehicle objectId of this object
 ---@field regionPermutation1 number
 ---@field regionPermutation2 number
 ---@field regionPermutation3 number
@@ -1014,13 +1013,11 @@ local objectStructure = {
     nameIndex = {type = "word", offset = 0xBA},
     playerId = {type = "dword", offset = 0xC0},
     parentId = {type = "dword", offset = 0xC4},
-    -- Experimental name properties
     isHealthEmpty = {type = "bit", offset = 0x106, bitLevel = 2},
     animationTagId = {type = "dword", offset = 0xCC},
     animation = {type = "word", offset = 0xD0},
     animationFrame = {type = "word", offset = 0xD2},
     isNotDamageable = {type = "bit", offset = 0x106, bitLevel = 11},
-    vehicleObjectId = {type = "dword", offset = 0x11C},
     regionPermutation1 = {type = "byte", offset = 0x180},
     regionPermutation2 = {type = "byte", offset = 0x181},
     regionPermutation3 = {type = "byte", offset = 0x182},
@@ -1059,6 +1056,7 @@ local objectStructure = {
 ---@field landing number Biped landing state, 0 when landing, stays on 0 when landing hard, null otherwise
 ---@field bumpedObjectId number Object ID that the biped is bumping, vehicles, bipeds, etc, keeps the previous value if not bumping a new object
 ---@field vehicleSeatIndex number Current vehicle seat index of this biped
+---@field vehicleObjectId number Current vehicle objectId of this object
 ---@field walkingState number Biped walking state, 0 = not walking, 1 = walking, 2 = stoping walking, 3 = stationary
 ---@field motionState number Biped motion state, 0 = standing , 1 = walking , 2 = jumping/falling
 ---@field mostRecentDamagerPlayer number Id of the player that caused the most recent damage to this biped
@@ -1091,6 +1089,7 @@ local bipedStructure = extendStructure(objectStructure, {
     secondaryNades = {type = "byte", offset = 0x31F},
     landing = {type = "byte", offset = 0x508},
     bumpedObjectId = {type = "dword", offset = 0x4FC},
+    vehicleObjectId = {type = "dword", offset = 0x11C},
     vehicleSeatIndex = {type = "word", offset = 0x2F0},
     walkingState = {type = "char", offset = 0x503},
     motionState = {type = "byte", offset = 0x4D2},
@@ -2166,17 +2165,10 @@ function blam.getObject(idOrIndex)
     return nil
 end
 
----@class deviceGroup
----@field power number
----@field position number
-
---- Return a object
----@param idOrIndex number
----@return deviceGroup
+--- Return an element from the device machines table
+---@param index number
+---@return number
 function blam.getDeviceGroup(index)
-    local power = 0
-    local position = 0
-
     -- Get object address
     if (index) then
         -- Get objects table
