@@ -10,11 +10,17 @@ objectClasses = blam.objectClasses
 tagClasses = blam.tagClasses
 local harmony = require "mods.harmony"
 local core = require "mimic.core"
+local coop = require "mimic.coop"
+local hsc = require "mimic.hsc"
 local scriptVersion = require "mimic.version"
 
 local glue = require "glue"
 local split = glue.string.split
+local append = glue.append
+
 local color = require "ncolor"
+
+local concat = table.concat
 
 -- Script setting variables (do not modify them manually)
 DebugMode = false
@@ -157,7 +163,23 @@ function ProcessPacket(message, packetType, packet)
     elseif (packetType == "@i") then
         local votesLeft = packet[2]
         local difficulty = packet[3]
-        core.updateCoopInfo(votesLeft, difficulty)
+        coop.updateCoopInfo(votesLeft, difficulty)
+    else
+        for actionName, action in pairs(hsc) do
+            if (packetType == action.packetType) then
+                dprint(message)
+                local syncCommand = {action.name}
+                for argumentIndex, arg in pairs(action.arguments) do
+                    local outputValue = packet[argumentIndex + 1]
+                    if (arg.value and arg.class) then
+                        outputValue = blam.getTag(tonumber(outputValue))[arg.value]
+                    end
+                    append(syncCommand, outputValue)
+                end
+                execute_script(concat(syncCommand, " "))
+            end
+        end
+        
     end
     -- dprint("Packet processed, elapsed time: %.6f\n", os.clock() - time)
 end
@@ -178,8 +200,8 @@ end
 
 local function onGameStart()
     gameStarted = true
-    if (map:find("coop")) then
-        availableBipeds = core.loadCoopMenu()
+    if (map:find("coop_evolved")) then
+        availableBipeds = coop.loadCoopMenu()
     end
 end
 
@@ -299,7 +321,7 @@ function OnPacket(message)
         clientSideProjectiles(true)
         return false
     elseif (message == "open_coop_menu") then
-        availableBipeds = core.loadCoopMenu(true)
+        availableBipeds = coop.loadCoopMenu(true)
         return false
     end
 end
@@ -330,8 +352,8 @@ function OnCommand(command)
         console_out(scriptVersion)
         return false
     elseif (command == "mspawn") then
-        core.enableSpawns()
-        core.loadCoopMenu(true)
+        coop.enableSpawn()
+        coop.loadCoopMenu(true)
         return false
     end
 end
@@ -357,7 +379,7 @@ function OnMenuAccept(widgetTagId)
                     if (globals) then
                         local player = blam.player(get_player())
                         local mpInfo = globals.multiplayerInformation
-                        mpInfo[1].unit = core.loadCoopMenu(false)[desiredBipedIndex].id
+                        mpInfo[1].unit = coop.loadCoopMenu(false)[desiredBipedIndex].id
                         console_out("Replacing biped...")
                         globals.multiplayerInformation = mpInfo
                         delete_object(player.objectId)

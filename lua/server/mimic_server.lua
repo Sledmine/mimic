@@ -18,13 +18,14 @@ void set_hs_globals_set_callback(void (*callback)(void));
 local harmonySapp = ffi.load("./harmony_s.dll")
 
 -- Lua modules
-local inspect = require "inspect"
 local glue = require "glue"
 local split = glue.string.split
 
 -- Halo Custom Edition modules
 local blam = require "blam"
+local isNull = blam.isNull
 local core = require "mimic.core"
+local coop = require "mimic.coop"
 local toSentenceCase = core.toSentenceCase
 
 -- Settings
@@ -41,17 +42,18 @@ local aiList = {}
 local aiCollection = {}
 local mapBipedTags = {}
 local customPlayerBipeds = {}
-local vehiclesList = {}
-local deviceMachinesList = {}
-local isGameOnCinematic = false
+VehiclesList = {}
+DeviceMachinesList = {}
+IsGameOnCinematic = false
 local allowCustomBipeds = true
 local aiCount = 0
 VotesList = {}
 CoopStarted = false
-local syncCmd = ""
+LastSyncCommand = ""
 local currentBspIndex
+local currentScenario
 
-local function broadcast(message)
+function Broadcast(message)
     for playerIndex = 1, 16 do
         if (player_present(playerIndex)) then
             rprint(playerIndex, message)
@@ -59,140 +61,20 @@ local function broadcast(message)
     end
 end
 
-local function send(playerIndex, message)
+function Send(playerIndex, message)
     rprint(playerIndex, message)
 end
 
-local function hscSetCallback()
-    -- Get value from the hsc value we are looking for via echo event
-    execute_command("inspect sync_hsc_command", 0, true)
-end
-
-local function findNewSpawn(deadPlayerIndex)
-    local playerUsedForSpawn
-    if (not isGameOnCinematic) then
-        for playerIndex = 1, 16 do
-            if (player_present(playerIndex)) then
-                local player = blam.biped(get_dynamic_player(playerIndex))
-                if (player) then
-                    if (not player.isOutSideMap) then
-                        if (player.health > 0 and player.isOnGround and playerIndex ~=
-                            deadPlayerIndex) then
-                            local scenario = blam.scenario(0)
-                            if (scenario) then
-                                local playerName = get_var(playerIndex, "$name")
-                                local playerSpawns = scenario.spawnLocationList
-                                -- Update second player spawn point on the scenario
-                                -- Usually the first spawn point is for local/campaign purposes only
-                                -- TODO Check if a vehicle can use the is on ground flag as well
-                                if (blam.isNull(player.vehicleObjectId)) then
-                                    playerUsedForSpawn = playerName
-                                    for spawnIndex, spawn in pairs(playerSpawns) do
-                                        playerSpawns[spawnIndex].x = player.x
-                                        playerSpawns[spawnIndex].y = player.y
-                                        playerSpawns[spawnIndex].z = player.z + 0.3
-                                    end
-                                else
-                                    local vehicle = blam.object(get_object(player.vehicleObjectId))
-                                    if (vehicle) then
-                                        playerUsedForSpawn = playerName
-                                        for spawnIndex, spawn in pairs(playerSpawns) do
-                                            playerSpawns[spawnIndex].x = vehicle.x
-                                            playerSpawns[spawnIndex].y = vehicle.y
-                                            playerSpawns[spawnIndex].z = vehicle.z + 0.3
-                                        end
-                                    end
-                                end
-                                -- Update player spawns list on the scenario
-                                scenario.spawnLocationList = playerSpawns
-                                break
-                            end
-                        end
-                    end
-                end
-            end
+function SyncHSC(_, hscMimicCommand)
+    if (hscMimicCommand ~= "nd" and LastSyncCommand ~= hscMimicCommand) then
+        LastSyncCommand = hscMimicCommand
+        local syncCommand = core.adaptHSC(hscMimicCommand)
+        if (syncCommand) then
+            console_out(hscMimicCommand)
+            Broadcast(hscMimicCommand)
         end
-        if (playerUsedForSpawn) then
-            say_all("Using " .. playerUsedForSpawn .. " as respawn point..")
-        else
-            say_all("No respawn candidate was found!")
-        end
-    else
-        -- say_all("Game is on cinematic, respawn will not be updated!")
-    end
-    return true
-end
-
-function SyncHSC(_, sHscCmd)
-    if (sHscCmd ~= "nd" and syncCmd ~= sHscCmd) then
-        syncCmd = sHscCmd
-        console_out(syncCmd)
-        -- Check if the map is trying to get a player on a vehicle
-        if (syncCmd:find("unit_enter_vehicle") and syncCmd:find("player")) then
-            local params = glue.string.split(syncCmd, " ")
-            local unitName = params[2]
-            -- local playerIndex = to_player_index(tonumber(params[2], 10))
-            local playerIndex = to_player_index(tonumber(unitName:gsub("player", ""), 10))
-            local objectName = params[3]
-            local seatIndex = tonumber(params[4], 10)
-            for vehicleObjectId, vehicleTagId in pairs(vehiclesList) do
-                local vehicle = blam.object(get_object(vehicleObjectId))
-                if (vehicle and (not blam.isNull(vehicle.nameIndex))) then
-                    local scenario = blam.scenario(0)
-                    local objectScenarioName = scenario.objectNames[vehicle.nameIndex + 1]
-                    if (objectName == objectScenarioName) then
-                        if (player_present(playerIndex)) then
-                            -- console_out(inspect(params))
-                            console_out(playerIndex)
-                            console_out(objectName)
-                            console_out(seatIndex)
-                            enter_vehicle(vehicleObjectId, playerIndex, seatIndex)
-                        end
-                    end
-                end
-            end
-        elseif (syncCmd:find("object_create")) then
-            -- Prevent object creation only if server creates a non biped/vehicle object
-            local params = glue.string.split(syncCmd, " ")
-            local objectName = params[2]
-            for vehicleObjectId, vehicleTagId in pairs(vehiclesList) do
-                local vehicle = blam.object(get_object(vehicleObjectId))
-                if (vehicle and (not blam.isNull(vehicle.nameIndex))) then
-                    local scenario = blam.scenario(0)
-                    local objectScenarioName = scenario.objectNames[vehicle.nameIndex + 1]
-                    if (objectName == objectScenarioName) then
-                        return
-                    end
-                end
-            end
-            -- elseif (syncCommand:find("switch_bsp")) then
-            -- Deprecating this as there is a new bsp sync feature OnTick
-            -- findNewSpawn()
-            -- currentBspIndex = tonumber(glue.string.split(command, " ")[2])
-            -- say_all("Saving new bsp index...")
-        elseif (syncCmd:find("object_teleport") and syncCmd:find("player")) then
-            -- Prevent object teleport desync on client
-            return
-        elseif (syncCmd:find("nav_point")) then
-            -- FIXME This is not working for some reason
-            for playerIndex = 0, 15 do
-                broadcast(syncCmd:gsub("player0", "player" .. playerIndex))
-            end
-            return
-        elseif (syncCmd:find("camera_control")) then
-            -- TODO Add cinematic_start and cinematic_stop for accurate cinematic determination
-            local params = glue.string.split(syncCmd, " ")
-            isGameOnCinematic = params[2] == "true"
-            if (isGameOnCinematic) then
-                say_all("Warning, game is on cinematic!")
-            else
-                say_all("Done, cinematic has ended!")
-            end
-        end
-        broadcast(syncCmd)
-        -- This is not really required, needs testing as it triggers twice the set callback
-        -- FIXME Improve testing on this
-        -- execute_command([[set sync_hsc_command ""]])
+        -- Uncommenting this probably will be required for very specific hsc specific script cases
+        -- execute_command("set sync_hsc_command \"\"")
     end
 end
 
@@ -204,17 +86,16 @@ function CleanBipeds(strServerObjectId)
     return false
 end
 
-local function syncAITags(playerIndex)
+function SyncAITags(playerIndex)
     -- Sync all the available AI
     -- TODO Add async function for this
     for objectId, tagId in pairs(aiList) do
         local spawnPacket = core.spawnPacket(tagId, objectId)
-        send(playerIndex, spawnPacket)
+        Send(playerIndex, spawnPacket)
     end
-    return false
 end
 
-local function syncUpdateAI()
+function SyncUpdateAI()
     local newAiCount = #glue.keys(aiList)
     if (aiCount ~= newAiCount) then
         aiCount = newAiCount
@@ -238,7 +119,7 @@ local function syncUpdateAI()
                                         -- FIXME In some cases packet is nil, review it
                                         local updatePacket = core.updatePacket(serverObjectId, ai)
                                         if (updatePacket) then
-                                            send(playerIndex, updatePacket)
+                                            Send(playerIndex, updatePacket)
                                         end
                                     end
                                 else
@@ -247,7 +128,7 @@ local function syncUpdateAI()
                                         -- FIXME In some cases packet is nil, review it
                                         local updatePacket = core.updatePacket(serverObjectId, ai)
                                         if (updatePacket) then
-                                            send(playerIndex, updatePacket)
+                                            Send(playerIndex, updatePacket)
                                         end
                                     end
                                 end
@@ -262,7 +143,7 @@ local function syncUpdateAI()
                 else
                     -- Biped is dead, sync dead packet, then remove it from the sync list
                     local killPacket = core.deletePacket(serverObjectId)
-                    broadcast(killPacket)
+                    Broadcast(killPacket)
                     if (not aiCollection[serverObjectId]) then
                         local mostRecentDamagerPlayer = ai.mostRecentDamagerPlayer
                         if (not blam.isNull(mostRecentDamagerPlayer)) then
@@ -296,21 +177,22 @@ local function syncUpdateAI()
 end
 
 function OnPlayerPreSpawn(playerIndex)
-    -- Find new spawn candidates, tell client to allow going trough bipeds
-    send(playerIndex, "disable_biped_collision")
-    if (currentBspIndex) then
-        send(playerIndex, "sync_switch_bsp " .. currentBspIndex)
-    end
     timer(30, "SyncAITags", playerIndex)
 end
 
 function SyncState(playerIndex)
-    broadcast("@i," .. core.getRequiredVotes() .. ",4")
+    -- Sync current bsp
+    if (currentBspIndex) then
+        Send(playerIndex, "sync_switch_bsp " .. currentBspIndex)
+    end
+    -- Specifiy client to allow going trough bipeds
+    Send(playerIndex, "disable_biped_collision")
+    Broadcast("@i," .. coop.getRequiredVotes() .. ",4")
     if (not CoopStarted) then
-        send(playerIndex, "sync_camera_control 1")
-        send(playerIndex, "sync_camera_set insertion_1a 0")
-        send(playerIndex, "sync_camera_set index_drop_1a 0")
-        send(playerIndex, "open_coop_menu")
+        Send(playerIndex, "sync_camera_control 1")
+        Send(playerIndex, "sync_camera_set insertion_1a 0")
+        Send(playerIndex, "sync_camera_set index_drop_1a 0")
+        Send(playerIndex, "open_coop_menu")
     end
 end
 
@@ -321,26 +203,32 @@ function OnPlayerJoin(playerIndex)
 end
 
 function OnPlayerLeave(playerIndex)
-    VotesList[playerIndex] = nil
-    --if (allowCustomBipeds) then
-    --    customPlayerBipeds[playerIndex] = nil
-    --end
-    findNewSpawn(playerIndex)
+    -- Disabled because some maps need multiple rejoining along the game
+    --[[
+    if (allowCustomBipeds) then
+        customPlayerBipeds[playerIndex] = nil
+    end
+    ]]
+    if (not CoopStarted) then
+        VotesList[playerIndex] = nil
+    end
+    coop.findNewSpawn(playerIndex)
 end
 
 function OnPlayerDead(deadPlayerIndex)
+    --[[
     local deaths = 0
     local playersCount = tonumber(get_var(0, "$pn"))
-    ---- FIXME Sometimes this events gets triggered when there is just one player alive
-    -- local playerDeaths = tonumber(get_var(deadPlayerIndex, "$deaths"))
-    -- if (playerDeaths > 0) then
-    --    deaths = deaths + 1
-    -- end
-    findNewSpawn(deadPlayerIndex)
+    local playerDeaths = tonumber(get_var(deadPlayerIndex, "$deaths"))
+    if (playerDeaths > 0) then
+       deaths = deaths + 1
+    end
     if (deaths == playersCount) then
         say_all("Game over, AI wins...")
-        -- execute_script("sv_map_next")
+        execute_script("sv_map_next")
     end
+    ]]
+    coop.findNewSpawn(deadPlayerIndex)
 end
 
 function IncreaseAIHealth()
@@ -355,8 +243,9 @@ function IncreaseAIHealth()
 end
 
 function ResetState()
+    CoopStarted = false
     aiList = {}
-    vehiclesList = {}
+    VehiclesList = {}
     mapBipedTags = {}
     customPlayerBipeds = {}
     VotesList = {}
@@ -384,7 +273,7 @@ function OnCommand(playerIndex, command, environment, rconPassword)
                 local packetType = data[1]
                 if (packetType == "@r") then
                     if (not CoopStarted) then
-                        broadcast(core.infoPacket(core.registerVote(playerIndex), 4))
+                        Broadcast(core.infoPacket(coop.registerVote(playerIndex), 4))
                     end
                     return false
                 elseif (packetType == "@b") then
@@ -392,7 +281,7 @@ function OnCommand(playerIndex, command, environment, rconPassword)
                         local desiredBipedTagId = tonumber(data[2])
                         for bipedName, bipedTag in pairs(mapBipedTags) do
                             if (bipedTag.id == desiredBipedTagId) then
-                                send(playerIndex, "New biped selected!")
+                                Send(playerIndex, "New biped selected!")
                                 customPlayerBipeds[playerIndex] = bipedTag
                                 local player = blam.player(get_player(playerIndex))
                                 local playerBiped = blam.biped(get_object(player.objectId))
@@ -403,7 +292,7 @@ function OnCommand(playerIndex, command, environment, rconPassword)
                             end
                         end
                     else
-                        send(playerIndex, "Custom bipeds are not allowed!")
+                        Send(playerIndex, "Custom bipeds are not allowed!")
                     end
                     return false
                 end
@@ -430,7 +319,7 @@ function OnCommand(playerIndex, command, environment, rconPassword)
                 say_all("Mimic synchronization rate: " .. syncRate)
                 return false
             elseif (command:find("mspawn")) then
-                findNewSpawn()
+                coop.enableSpawn(true)
                 return false
             end
         end
@@ -443,12 +332,12 @@ function OnTick()
     if (bspIndex ~= currentBspIndex) then
         currentBspIndex = bspIndex
         console_out("New bsp index detected: " .. currentBspIndex)
-        findNewSpawn()
-        broadcast("sync_switch_bsp " .. currentBspIndex)
+        coop.findNewSpawn()
+        Broadcast("sync_switch_bsp " .. currentBspIndex)
     end
     if (currentScenario) then
         -- Check for device machine changes
-        for objectId, group in pairs(deviceMachinesList) do
+        for objectId, group in pairs(DeviceMachinesList) do
             local device = blam.deviceMachine(get_object(objectId))
             if (device) then
                 -- Only sync device machines that are name based due to mimic client limitations
@@ -458,13 +347,13 @@ function OnTick()
                         local currentPower = blam.getDeviceGroup(device.powerGroupIndex)
                         local currentPosition = blam.getDeviceGroup(device.positonGroupIndex)
                         if (currentPower ~= group.power) then
-                            deviceMachinesList[objectId].power = currentPower
-                            broadcast("sync_device_set_power " .. name .. " " .. currentPower)
+                            DeviceMachinesList[objectId].power = currentPower
+                            Broadcast("sync_device_set_power " .. name .. " " .. currentPower)
                             core.log(("Sync device \"%s\" new power: %s"):format(name, currentPower))
                         end
                         if (currentPosition ~= group.position) then
-                            deviceMachinesList[objectId].position = currentPosition
-                            broadcast("sync_device_set_position " .. name .. " " .. currentPosition)
+                            DeviceMachinesList[objectId].position = currentPosition
+                            Broadcast("sync_device_set_position " .. name .. " " .. currentPosition)
                             core.log(("Sync device \"%s\" new position: %s"):format(name,
                                                                                     currentPosition))
                         end
@@ -479,8 +368,10 @@ function OnTick()
             blam.bipedTag(playerBiped.tagId).disableCollision = true
             if (playerBiped.isOutSideMap) then
                 local player = blam.player(get_player(playerIndex))
-                if (not isGameOnCinematic and player) then
-                    delete_object(player.objectId)
+                if (not IsGameOnCinematic and player) then
+                    if (not isNull(playerBiped.vehicleObjectId)) then
+                        delete_object(player.objectId)
+                    end
                 end
             end
         end
@@ -508,13 +399,13 @@ function OnScriptLoad()
     end
     ResetState()
     -- Set hsc callback to follow actions requesting synchronization
-    harmonySapp.set_hs_globals_set_callback(hscSetCallback)
+    harmonySapp.set_hs_globals_set_callback(function ()
+        execute_command("inspect sync_hsc_command", 0, true)
+    end)
     -- Netcode does not sync AI projectiles, force it with this
     -- execute_script("allow_client_side_weapon_projectiles 0")
     -- Start syncing AI every amount of seconds
-    SyncUpdateAI = syncUpdateAI
-    FindNewSpawn = findNewSpawn
-    SyncAITags = syncAITags
+    FindNewSpawn = coop.findNewSpawn
     timer(syncRate, "SyncUpdateAI")
     timer(20000, "FindNewSpawn")
     -- Set server callback
@@ -538,7 +429,7 @@ function OnObjectSpawn(playerIndex, tagId, parentId, objectId)
             if (playerIndex == 0) then
                 aiList[objectId] = tagId
                 local spawnPacket = core.spawnPacket(tagId, objectId)
-                broadcast(spawnPacket)
+                Broadcast(spawnPacket)
             else
                 local customBipedTag = customPlayerBipeds[playerIndex]
                 if (customBipedTag) then
@@ -546,9 +437,9 @@ function OnObjectSpawn(playerIndex, tagId, parentId, objectId)
                 end
             end
         elseif (tag.class == blam.tagClasses.vehicle) then
-            vehiclesList[objectId] = tagId
+            VehiclesList[objectId] = tagId
         elseif (tag.class == blam.tagClasses.deviceMachine) then
-            deviceMachinesList[objectId] = {power = 1, position = 0}
+            DeviceMachinesList[objectId] = {power = -1, position = -1}
         end
     end
     return true
@@ -565,7 +456,8 @@ function OnScriptUnload()
 end
 
 -- Log traceback for debug purposes
-function OnError(Message)
+function OnError(message)
+    print(message)
     local tb = debug.traceback()
     print(tb)
     say_all("An error is ocurring on the server side, contact an admin!")
