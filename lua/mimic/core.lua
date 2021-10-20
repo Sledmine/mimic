@@ -63,15 +63,6 @@ function core.getIndexById(id)
 end
 
 ---Create a packet string to spawn an AI
----@param tagId number
----@param serverId number
----@return string spawnPacket
-function core.spawnPacket(tagId, serverId)
-    local tagIndex = core.getIndexById(tagId)
-    return concat({"@s", tagIndex, serverId}, packetSeparator)
-end
-
----Create a packet string to spawn an AI
 ---@param serverId number
 ---@param biped biped
 ---@return string updatePacket
@@ -118,12 +109,18 @@ function core.deletePacket(serverId)
     return concat({"@k", serverId}, packetSeparator)
 end
 
-function core.positionPacket(player)
+--- Create a position data packet
+---@param biped blamObject
+---@param serverId number
+---@return string
+function core.positionPacket(serverId, biped)
     return concat({
         "@p",
-        encode("f", player.xVel),
-        encode("f", player.yVel),
-        encode("f", player.zVel)
+        serverId,
+        biped.tagId,
+        encode("f", biped.x),
+        encode("f", biped.y),
+        encode("f", biped.z)
     }, packetSeparator)
 end
 
@@ -131,14 +128,14 @@ function core.infoPacket(votesLeft, difficulty)
     return concat({"@i", votesLeft, difficulty}, packetSeparator)
 end
 
---- Check if player is near by to an object
+--- Check if biped is near by to an object
+---@param biped blamObject
 ---@param target blamObject
 ---@param sensitivity number
-function core.objectIsNearTo(player, target, sensitivity)
-    -- local player = blam.object(get_dynamic_player())
-    if (target and player) then
-        local distance = math.sqrt((target.x - player.x) ^ 2 + (target.y - player.y) ^ 2 +
-                                       (target.z - player.z) ^ 2)
+function core.objectIsNearTo(biped, target, sensitivity)
+    if (target and biped) then
+        local distance = math.sqrt((target.x - biped.x) ^ 2 + (target.y - biped.y) ^ 2 +
+                                       (target.z - biped.z) ^ 2)
         if (math.abs(distance) < sensitivity) then
             return true
         end
@@ -158,8 +155,8 @@ function core.syncBiped(tagId, x, y, z, vX, vY, animation, animationFrame, r, g,
             biped.vY = vY
             biped.animation = animation
             biped.animationFrame = animationFrame
+            -- biped.zVel = 0.00001
             biped.isNotDamageable = true
-            biped.zVel = 0.00001
             biped.redA = r
             biped.greenA = g
             biped.blueA = b
@@ -175,7 +172,7 @@ end
 function core.updateBiped(objectId, x, y, z, vX, vY, animation, animationFrame, r, g, b, invisible)
     if (objectId) then
         local biped = blam.biped(get_object(objectId))
-        if (biped) then
+        if (biped and not biped.isHealthEmpty) then
             biped.x = x
             biped.y = y
             biped.z = z
@@ -183,9 +180,7 @@ function core.updateBiped(objectId, x, y, z, vX, vY, animation, animationFrame, 
             biped.vY = vY
             biped.animation = animation
             biped.animationFrame = animationFrame
-            biped.isNotDamageable = true
-            biped.isHealthEmpty = false
-            biped.zVel = 0.00001
+            biped.zVel = 0
             biped.redA = r
             biped.greenA = g
             biped.blueA = b
@@ -196,6 +191,46 @@ function core.updateBiped(objectId, x, y, z, vX, vY, animation, animationFrame, 
         dprint("Error, at trying to sync biped.")
     end
     return false
+end
+
+--- "Virtualize" biped object, applies required transformations for easier network sync
+---@param biped blamObject
+function core.virtualizeBiped(biped)
+    biped.isGhost = false
+    biped.isOutSideMap = false
+    biped.isNotDamageable = true
+    biped.ignoreGravity = true
+    biped.isCollideable = true
+    biped.hasNoCollision = false
+    biped.zVel = 0
+    biped.xVel = 0
+    biped.yVel = 0
+end
+
+--- Hide biped object from the game, apply transformations to somehow hide the specifed biped
+---@param biped blamObject
+function core.hideBiped(biped)
+    biped.isGhost = true
+    biped.isNotDamageable = true
+    biped.ignoreGravity = true
+    biped.isCollideable = false
+    biped.hasNoCollision = true
+    biped.zVel = 0
+    biped.xVel = 0
+    biped.yVel = 0
+    -- biped.x = 0
+    -- biped.y = 0
+    -- biped.z = 0
+end
+
+--- Revert virtualization transformations
+---@param biped blamObject
+function core.revertBipedVirtualization(biped)
+    biped.isGhost = false
+    biped.isNotDamageable = false
+    biped.ignoreGravity = false
+    biped.isCollideable = true
+    biped.hasNoCollision = false
 end
 
 --- Find the path, index and id of a tag given partial name and tag type
@@ -355,12 +390,13 @@ function core.adaptHSC(command)
             if (command:find(actionName .. " ")) then
                 local params = split(command, " ")
                 local syncCommand = {action.packetType}
+                console_out(command)
                 for argumentIndex, arg in pairs(action.arguments) do
                     local sourceValue = params[argumentIndex + 1]
                     if (sourceValue) then
                         sourceValue = tostring(sourceValue):gsub("'", "")
                         if (arg.value and arg.class) then
-                            -- console_out(sourceValue)
+                            console_out(sourceValue)
                             sourceValue = tostring(blam.getTag(sourceValue, arg.class).id)
                         end
                         append(syncCommand, sourceValue)
@@ -374,6 +410,17 @@ function core.adaptHSC(command)
         end
     end
     return command
+end
+
+function core.dispatchAISpawn(upcomingAiSpawn)
+    for objectId, tagId in pairs(upcomingAiSpawn) do
+        local ai = blam.biped(get_object(objectId))
+        if (ai and not ai.isHealthEmpty and blam.isNull(ai.nameIndex)) then
+            Broadcast(core.positionPacket(objectId, ai))
+            upcomingAiSpawn[objectId] = nil
+        end
+    end
+    return upcomingAiSpawn
 end
 
 return core

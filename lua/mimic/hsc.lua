@@ -48,5 +48,16 @@ return {
             },
             {name = "animation", type = "string"}
         }
+    },
+    unit_custom_animation_at_frame = {
+        name = "unit_custom_animation_at_frame",
+        packetType = "@ucaatf",
+        arguments = {
+            {name = "unit", type = "string"},
+            {name = "animation_graph", type = "string", value = "path", class = tagClasses.modelAnimations},
+            {name = "animation", type = "string"},
+            {name = "interpolate", type = "boolean"},
+            {name = "frame", type = "number"}
+        }
     }
 }

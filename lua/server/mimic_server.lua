@@ -42,6 +42,7 @@ local aiList = {}
 local aiCollection = {}
 local mapBipedTags = {}
 local customPlayerBipeds = {}
+local upcomingAiSpawn = {}
 VehiclesList = {}
 DeviceMachinesList = {}
 IsGameOnCinematic = false
@@ -86,12 +87,30 @@ function CleanBipeds(strServerObjectId)
     return false
 end
 
-function SyncAITags(playerIndex)
+function SyncAIData(playerIndex)
     -- Sync all the available AI
     -- TODO Add async function for this
-    for objectId, tagId in pairs(aiList) do
-        local spawnPacket = core.spawnPacket(tagId, objectId)
-        Send(playerIndex, spawnPacket)
+    for objectId in pairs(aiList) do
+        local ai = blam.biped(get_object(objectId))
+        -- FIXME We need a better way to determine if a biped is DEAD for sure, server works differently
+        if (ai and not ai.isHealthEmpty) then
+            Send(playerIndex, core.positionPacket(objectId, ai))
+        end
+    end
+    for objectId, group in pairs(DeviceMachinesList) do
+        local device = blam.deviceMachine(get_object(objectId))
+        if (device) then
+            -- Only sync device machines that are name based due to mimic client limitations
+            if (not blam.isNull(device.nameIndex)) then
+                local name = currentScenario.objectNames[device.nameIndex + 1]
+                if (name) then
+                    Broadcast("sync_device_set_power " .. name .. " " ..
+                                  DeviceMachinesList[objectId].power)
+                    Broadcast("sync_device_set_position_immediate " .. name .. " " ..
+                                  DeviceMachinesList[objectId].position)
+                end
+            end
+        end
     end
 end
 
@@ -107,64 +126,73 @@ function SyncUpdateAI()
     if (playersCount > 0) then
         for serverObjectId, tagId in pairs(aiList) do
             local ai = blam.biped(get_object(serverObjectId))
-            if (ai and blam.isNull(ai.nameIndex)) then
-                -- Biped is alive, we need to sync it
-                if (ai.health > 0) then
-                    for playerIndex = 1, 16 do
-                        if (player_present(playerIndex)) then
-                            local player = blam.biped(get_dynamic_player(playerIndex))
-                            if (player) then
-                                if (blam.isNull(player.vehicleObjectId)) then
-                                    if (core.objectIsNearTo(player, ai, syncRadius)) then
-                                        -- FIXME In some cases packet is nil, review it
-                                        local updatePacket = core.updatePacket(serverObjectId, ai)
-                                        if (updatePacket) then
-                                            Send(playerIndex, updatePacket)
+            if (ai) then
+                if (blam.isNull(ai.nameIndex)) then
+                    -- Biped is alive, we need to sync it
+                    if (not ai.isHealthEmpty) then
+                        if (not ai.isOutSideMap) then
+                            for playerIndex = 1, 16 do
+                                if (player_present(playerIndex)) then
+                                    local player = blam.biped(get_dynamic_player(playerIndex))
+                                    if (player) then
+                                        if (blam.isNull(player.vehicleObjectId)) then
+                                            if (core.objectIsNearTo(player, ai, syncRadius)) then
+                                                -- FIXME In some cases packet is nil, review it
+                                                local updatePacket = core.updatePacket(
+                                                                         serverObjectId, ai)
+                                                if (updatePacket) then
+                                                    Send(playerIndex, updatePacket)
+                                                end
+                                            end
+                                        else
+                                            local vehicle = blam.object(get_object(
+                                                                            player.vehicleObjectId))
+                                            if (vehicle and
+                                                core.objectIsNearTo(vehicle, ai, syncRadius)) then
+                                                -- FIXME In some cases packet is nil, review it
+                                                local updatePacket = core.updatePacket(
+                                                                         serverObjectId, ai)
+                                                if (updatePacket) then
+                                                    Send(playerIndex, updatePacket)
+                                                end
+                                            end
                                         end
-                                    end
-                                else
-                                    local vehicle = blam.object(get_object(player.vehicleObjectId))
-                                    if (vehicle and core.objectIsNearTo(vehicle, ai, syncRadius)) then
-                                        -- FIXME In some cases packet is nil, review it
-                                        local updatePacket = core.updatePacket(serverObjectId, ai)
-                                        if (updatePacket) then
-                                            Send(playerIndex, updatePacket)
-                                        end
+                                    else
+                                        -- This was disabled as this forces every biped to be synced
+                                        -- Resulting on really low performance
+                                        -- local updatePacket = core.updatePacket(serverObjectId, ai)
+                                        -- send(playerIndex, updatePacket)
                                     end
                                 end
-                            else
-                                -- This was disabled as this forces every biped to be synced
-                                -- Resulting on really low performance
-                                -- local updatePacket = core.updatePacket(serverObjectId, ai)
-                                -- send(playerIndex, updatePacket)
                             end
                         end
-                    end
-                else
-                    -- Biped is dead, sync dead packet, then remove it from the sync list
-                    local killPacket = core.deletePacket(serverObjectId)
-                    Broadcast(killPacket)
-                    if (not aiCollection[serverObjectId]) then
-                        local mostRecentDamagerPlayer = ai.mostRecentDamagerPlayer
-                        if (not blam.isNull(mostRecentDamagerPlayer)) then
-                            local playerIndex = core.getIndexById(mostRecentDamagerPlayer) + 1
-                            local playerName = get_var(playerIndex, "$name")
-                            local player = blam.player(get_player(playerIndex))
-                            if (player) then
-                                for tagName, tag in pairs(mapBipedTags) do
-                                    if (tag.id == ai.tagId) then
-                                        say_all(playerName .. " killed " .. toSentenceCase(tagName))
-                                        break
+                    elseif (ai.health <= 0) then
+                        -- Biped is dead, sync dead packet, then remove it from the sync list
+                        local killPacket = core.deletePacket(serverObjectId)
+                        Broadcast(killPacket)
+                        if (not aiCollection[serverObjectId]) then
+                            local mostRecentDamagerPlayer = ai.mostRecentDamagerPlayer
+                            if (not blam.isNull(mostRecentDamagerPlayer)) then
+                                local playerIndex = core.getIndexById(mostRecentDamagerPlayer) + 1
+                                local playerName = get_var(playerIndex, "$name")
+                                local player = blam.player(get_player(playerIndex))
+                                if (player) then
+                                    for tagName, tag in pairs(mapBipedTags) do
+                                        if (tag.id == ai.tagId) then
+                                            say_all(
+                                                playerName .. " killed " .. toSentenceCase(tagName))
+                                            break
+                                        end
                                     end
+                                    player.kills = player.kills + 1
                                 end
-                                player.kills = player.kills + 1
                             end
+                            -- Biped is now dead, remove it from the list
+                            -- Set that this biped already has a timer asigned for removal
+                            aiCollection[serverObjectId] = true
+                            -- Set collector, it helps to keep sending kill packet to player
+                            timer(350, "CleanBipeds", serverObjectId)
                         end
-                        -- Biped is now dead, remove it from the list
-                        -- Set that this biped already has a timer asigned for removal
-                        aiCollection[serverObjectId] = true
-                        -- Set collector, it helps to keep sending kill packet to player
-                        timer(350, "CleanBipeds", serverObjectId)
                     end
                 end
             else
@@ -177,7 +205,7 @@ function SyncUpdateAI()
 end
 
 function OnPlayerPreSpawn(playerIndex)
-    timer(30, "SyncAITags", playerIndex)
+    timer(100, "SyncAIData", playerIndex)
 end
 
 function SyncState(playerIndex)
@@ -234,7 +262,7 @@ end
 function IncreaseAIHealth()
     for serverObjectId, tagId in pairs(aiList) do
         local biped = blam.biped(get_object(serverObjectId))
-        if (biped and biped.health > 0) then
+        if (biped and not biped.isHealthEmpty) then
             biped.health = biped.health + 0.5
         end
     end
@@ -321,6 +349,17 @@ function OnCommand(playerIndex, command, environment, rconPassword)
             elseif (command:find("mspawn")) then
                 coop.enableSpawn(true)
                 return false
+            elseif (command:find("mbullshit")) then
+                local data = split(command:gsub("\"", ""), " ")
+                local serverId = tonumber(data[2])
+                local biped = blam.getObject(serverId)
+                local tag = blam.getTag(biped.tagId)
+                if (biped) then
+                    Send(playerIndex, tag.path .. " - HP: " .. biped.health)
+                else
+                    Send(playerIndex, "Warning, biped does not exist on the server.")
+                end
+                return false
             end
         end
     end
@@ -376,6 +415,7 @@ function OnTick()
             end
         end
     end
+    upcomingAiSpawn = core.dispatchAISpawn(upcomingAiSpawn)
 end
 
 -- Put initialization code here
@@ -399,7 +439,7 @@ function OnScriptLoad()
     end
     ResetState()
     -- Set hsc callback to follow actions requesting synchronization
-    harmonySapp.set_hs_globals_set_callback(function ()
+    harmonySapp.set_hs_globals_set_callback(function()
         execute_command("inspect sync_hsc_command", 0, true)
     end)
     -- Netcode does not sync AI projectiles, force it with this
@@ -428,8 +468,7 @@ function OnObjectSpawn(playerIndex, tagId, parentId, objectId)
         if (tag.class == blam.tagClasses.biped) then
             if (playerIndex == 0) then
                 aiList[objectId] = tagId
-                local spawnPacket = core.spawnPacket(tagId, objectId)
-                Broadcast(spawnPacket)
+                upcomingAiSpawn[objectId] = tagId
             else
                 local customBipedTag = customPlayerBipeds[playerIndex]
                 if (customBipedTag) then
