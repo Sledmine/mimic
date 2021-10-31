@@ -62,6 +62,21 @@ function core.getIndexById(id)
     return tonumber(concat(bytes, ""), 16)
 end
 
+--- Create a position data packet
+---@param biped blamObject
+---@param serverId number
+---@return string
+function core.positionPacket(serverId, biped)
+    return concat({
+        "@p",
+        serverId,
+        biped.tagId,
+        encode("f", biped.x),
+        encode("f", biped.y),
+        encode("f", biped.z)
+    }, packetSeparator)
+end
+
 ---Create a packet string to spawn an AI
 ---@param serverId number
 ---@param biped biped
@@ -107,21 +122,6 @@ end
 
 function core.deletePacket(serverId)
     return concat({"@k", serverId}, packetSeparator)
-end
-
---- Create a position data packet
----@param biped blamObject
----@param serverId number
----@return string
-function core.positionPacket(serverId, biped)
-    return concat({
-        "@p",
-        serverId,
-        biped.tagId,
-        encode("f", biped.x),
-        encode("f", biped.y),
-        encode("f", biped.z)
-    }, packetSeparator)
 end
 
 function core.infoPacket(votesLeft, difficulty)

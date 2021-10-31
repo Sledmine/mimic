@@ -130,43 +130,43 @@ function SyncUpdateAI()
                 if (blam.isNull(ai.nameIndex)) then
                     -- Biped is alive, we need to sync it
                     if (not ai.isHealthEmpty) then
+                        -- Only sync bsps inside the same bsp as the players
                         if (not ai.isOutSideMap) then
-                            for playerIndex = 1, 16 do
-                                if (player_present(playerIndex)) then
-                                    local player = blam.biped(get_dynamic_player(playerIndex))
-                                    if (player) then
-                                        if (blam.isNull(player.vehicleObjectId)) then
-                                            if (core.objectIsNearTo(player, ai, syncRadius)) then
-                                                -- FIXME In some cases packet is nil, review it
-                                                local updatePacket = core.updatePacket(
-                                                                         serverObjectId, ai)
-                                                if (updatePacket) then
-                                                    Send(playerIndex, updatePacket)
-                                                end
-                                            end
-                                        else
-                                            local vehicle = blam.object(get_object(
-                                                                            player.vehicleObjectId))
-                                            if (vehicle and
-                                                core.objectIsNearTo(vehicle, ai, syncRadius)) then
-                                                -- FIXME In some cases packet is nil, review it
-                                                local updatePacket = core.updatePacket(
-                                                                         serverObjectId, ai)
-                                                if (updatePacket) then
-                                                    Send(playerIndex, updatePacket)
-                                                end
+                            for playerIndex = 1, 16 do                         
+                                local player = blam.biped(get_dynamic_player(playerIndex))
+                                if (player) then
+                                    if (blam.isNull(player.vehicleObjectId)) then
+                                        if (core.objectIsNearTo(player, ai, syncRadius)) then
+                                            -- FIXME Some times packet is nil, debug this
+                                            local updatePacket = core.updatePacket(
+                                                                     serverObjectId, ai)
+                                            if (updatePacket) then
+                                                Send(playerIndex, updatePacket)
                                             end
                                         end
                                     else
-                                        -- This was disabled as this forces every biped to be synced
-                                        -- Resulting on really low performance
-                                        -- local updatePacket = core.updatePacket(serverObjectId, ai)
-                                        -- send(playerIndex, updatePacket)
+                                        local vehicle = blam.object(get_object(
+                                                                        player.vehicleObjectId))
+                                        if (vehicle and
+                                            core.objectIsNearTo(vehicle, ai, syncRadius)) then
+                                            -- FIXME Some times packet is nil, debug this
+                                            local updatePacket = core.updatePacket(
+                                                                     serverObjectId, ai)
+                                            if (updatePacket) then
+                                                Send(playerIndex, updatePacket)
+                                            end
+                                        end
                                     end
+                                else
+                                    -- This was disabled as this forces every biped to be synced
+                                    -- Resulting on really low performance
+                                    -- local updatePacket = core.updatePacket(serverObjectId, ai)
+                                    -- send(playerIndex, updatePacket)
                                 end
                             end
                         end
-                    elseif (ai.health <= 0) then
+                    --elseif (ai.health <= 0) then -- Biped health does not represent real ai health
+                    else
                         -- Biped is dead, sync dead packet, then remove it from the sync list
                         local killPacket = core.deletePacket(serverObjectId)
                         Broadcast(killPacket)
@@ -220,6 +220,7 @@ function SyncState(playerIndex)
         Send(playerIndex, "sync_camera_control 1")
         Send(playerIndex, "sync_camera_set insertion_1a 0")
         Send(playerIndex, "sync_camera_set index_drop_1a 0")
+        Send(playerIndex, "sync_camera_set insertion_1 0")
         Send(playerIndex, "open_coop_menu")
     end
 end
