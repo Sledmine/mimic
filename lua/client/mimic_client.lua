@@ -23,7 +23,7 @@ local color = require "ncolor"
 local concat = table.concat
 
 -- Script setting variables (do not modify them manually)
-DebugMode = true
+DebugMode = false
 local lastMapName
 local enableSync = false
 local asyncMode = false
@@ -164,27 +164,26 @@ function ProcessPacket(message, packetType, packet)
         local x = core.decode("f", packet[4])
         local y = core.decode("f", packet[5])
         local z = core.decode("f", packet[6])
-        if (not aiList[serverId] or (aiList[serverId] and not aiList[serverId].objectId)) then
-            -- dprint("FIRST #1 candidate search for %s...", serverId)
-            -- local candidateId = findBipedCandidate({x = x, y = y, z = z}, tagId)
-            -- if (candidateId) then
-            --    local object = blam.biped(get_object(candidateId))
-            --    local tag = blam.getTag(object.tagId)
-            --    dprint("->> Success, found %s: %s", tag.path, candidateId)
-            --    aiList[serverId] = {
-            --        tagId = tagId,
-            --        lastUpdateAt = time,
-            --        objectId = candidateId,
-            --        isLocal = false
-            --    }
-            --    object.isNotDamageable = true
-            --    object.ignoreGravity = false
-            --    object.isCollideable = true
-            --    object.hasNoCollision = false
-            --    object.isGhost = false
-            -- end
-
-        end
+        -- if (not aiList[serverId] or (aiList[serverId] and not aiList[serverId].objectId)) then
+        -- dprint("FIRST #1 candidate search for %s...", serverId)
+        -- local candidateId = findBipedCandidate({x = x, y = y, z = z}, tagId)
+        -- if (candidateId) then
+        --    local object = blam.biped(get_object(candidateId))
+        --    local tag = blam.getTag(object.tagId)
+        --    dprint("->> Success, found %s: %s", tag.path, candidateId)
+        --    aiList[serverId] = {
+        --        tagId = tagId,
+        --        lastUpdateAt = time,
+        --        objectId = candidateId,
+        --        isLocal = false
+        --    }
+        --    object.isNotDamageable = true
+        --    object.ignoreGravity = false
+        --    object.isCollideable = true
+        --    object.hasNoCollision = false
+        --    object.isGhost = false
+        -- end
+        -- end
         if (not aiList[serverId] or (aiList[serverId] and not aiList[serverId].objectId)) then
             local tag = blam.getTag(tagId)
             dprint("Registering AI %s:%s", serverId, tag.path)
@@ -324,12 +323,23 @@ local function onGameStart()
     if (map:find("coop_evolved")) then
         enableSync = true
         availableBipeds = coop.loadCoopMenu()
+
     end
 end
 
+local lastPlayerTagId
 function OnTick()
     if (not gameStarted) then
         onGameStart()
+    end
+    if (map:find("coop_evolved")) then
+        local playerBiped = blam.biped(get_dynamic_player())
+        if (playerBiped) then
+            if (lastPlayerTagId ~= playerBiped.tagId) then
+                lastPlayerTagId = playerBiped.tagId
+                coop.swapFirstPerson()
+            end    
+        end
     end
     if (lastMapName ~= map) then
         lastMapName = map
@@ -527,7 +537,7 @@ function OnCommand(command)
 end
 
 function OnMenuAccept(widgetTagId)
-    if (map:find("coop")) then
+    if (map:find("coop_evolved")) then
         local widgetTag = blam.getTag(widgetTagId)
         if (widgetTag) then
             if (widgetTag.path:find("ready_button", 1, true)) then
@@ -564,7 +574,6 @@ function OnUnload()
         disablePlayerCollision = false
         clientSideProjectiles(true)
     end
-    harmony.unload()
 end
 
 function OnPreFrame()

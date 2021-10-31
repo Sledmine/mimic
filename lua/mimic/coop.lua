@@ -184,4 +184,29 @@ function coop.activateHUDTimer(minutes, seconds)
     Broadcast(("sync_hud_set_timer_time %s %s"):format(minutes, seconds))
 end
 
+function coop.swapFirstPerson()
+    local player = blam.player(get_player())
+    local playerObject = blam.object(get_object(player.objectId))
+    local globals = blam.globalsTag()
+    if (player and playerObject and globals) then
+        local bipedTag = blam.getTag(playerObject.tagId)
+        if (bipedTag) then
+            local tagPathSplit = glue.string.split(bipedTag.path, "\\")
+            local bipedName = tagPathSplit[#tagPathSplit]
+            local fpModelTagId = blam.getTag([[[shm]\halo_1\characters\cyborg\fp\fp]],
+                                             tagClasses.gbxmodel).id
+            local fpTag = core.findTag(bipedName .. "_fp", tagClasses.gbxmodel)
+            if (fpTag) then
+                fpModelTagId = fpTag.id
+            end
+            if (fpModelTagId) then
+                -- Save default first person hands model
+                local newFirstPersonInterface = globals.firstPersonInterface
+                newFirstPersonInterface[1].firstPersonHands = fpModelTagId
+                globals.firstPersonInterface = newFirstPersonInterface
+            end
+        end
+    end
+end
+
 return coop
