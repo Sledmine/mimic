@@ -114,6 +114,51 @@ function SyncAIData(playerIndex)
     end
 end
 
+function SyncDeadAI()
+    local playersCount = tonumber(get_var(0, "$pn"))
+    if (playersCount > 0) then
+        for serverObjectId, tagId in pairs(aiList) do
+            local ai = blam.biped(get_object(serverObjectId))
+            if (ai) then
+                if (blam.isNull(ai.nameIndex)) then
+                    -- Biped is alive, we need to sync it
+                    if (ai.isHealthEmpty) then
+                        -- Biped is dead, sync dead packet, then remove it from the sync list
+                        local killPacket = core.deletePacket(serverObjectId)
+                        Broadcast(killPacket)
+                        if (not aiCollection[serverObjectId]) then
+                            local mostRecentDamagerPlayer = ai.mostRecentDamagerPlayer
+                            if (not blam.isNull(mostRecentDamagerPlayer)) then
+                                local playerIndex = core.getIndexById(mostRecentDamagerPlayer) + 1
+                                local playerName = get_var(playerIndex, "$name")
+                                local player = blam.player(get_player(playerIndex))
+                                if (player) then
+                                    for tagName, tag in pairs(mapBipedTags) do
+                                        if (tag.id == ai.tagId) then
+                                            say_all(
+                                                playerName .. " killed " .. toSentenceCase(tagName))
+                                            break
+                                        end
+                                    end
+                                    player.kills = player.kills + 1
+                                end
+                            end
+                            -- Biped is now dead, remove it from the list
+                            -- Set that this biped already has a timer asigned for removal
+                            aiCollection[serverObjectId] = true
+                            -- Set collector, it helps to keep sending kill packet to player
+                            timer(150, "CleanBipeds", serverObjectId)
+                        end
+                    end
+                end
+            else
+                -- This biped does not exist anymore on the server, erase it from the list
+                aiList[serverObjectId] = nil
+            end
+        end
+    end
+end
+
 function SyncUpdateAI()
     local newAiCount = #glue.keys(aiList)
     if (aiCount ~= newAiCount) then
@@ -164,39 +209,8 @@ function SyncUpdateAI()
                                 end
                             end
                         end
-                        -- elseif (ai.health <= 0) then -- Biped health does not represent real ai health
-                    else
-                        -- Biped is dead, sync dead packet, then remove it from the sync list
-                        local killPacket = core.deletePacket(serverObjectId)
-                        Broadcast(killPacket)
-                        if (not aiCollection[serverObjectId]) then
-                            local mostRecentDamagerPlayer = ai.mostRecentDamagerPlayer
-                            if (not blam.isNull(mostRecentDamagerPlayer)) then
-                                local playerIndex = core.getIndexById(mostRecentDamagerPlayer) + 1
-                                local playerName = get_var(playerIndex, "$name")
-                                local player = blam.player(get_player(playerIndex))
-                                if (player) then
-                                    for tagName, tag in pairs(mapBipedTags) do
-                                        if (tag.id == ai.tagId) then
-                                            say_all(
-                                                playerName .. " killed " .. toSentenceCase(tagName))
-                                            break
-                                        end
-                                    end
-                                    player.kills = player.kills + 1
-                                end
-                            end
-                            -- Biped is now dead, remove it from the list
-                            -- Set that this biped already has a timer asigned for removal
-                            aiCollection[serverObjectId] = true
-                            -- Set collector, it helps to keep sending kill packet to player
-                            timer(350, "CleanBipeds", serverObjectId)
-                        end
                     end
                 end
-            else
-                -- This biped does not exist anymore on the server, erase it from the list
-                aiList[serverObjectId] = nil
             end
         end
     end
@@ -250,14 +264,14 @@ function OnPlayerDead(deadPlayerIndex)
     local currentGameType = get_var(0, "$mode")
     if (currentGameType:find("survival")) then
         IncreaseAIHealth()
-        --local playerDeadTimes = 0
-        --local playersCount = tonumber(get_var(0, "$pn"))
-        --local player = blam.player(get_player(deadPlayerIndex))
-        --if (playerDeadTimes == playersCount) then
+        -- local playerDeadTimes = 0
+        -- local playersCount = tonumber(get_var(0, "$pn"))
+        -- local player = blam.player(get_player(deadPlayerIndex))
+        -- if (playerDeadTimes == playersCount) then
         --    say_all("Game over, AI wins...")
         --    local currentMapName = get_var(0, "$map")
         --    execute_script("sv_map " .. currentMapName .. " " .. currentGameType)
-        --end
+        -- end
     end
     coop.findNewSpawn(deadPlayerIndex)
 end
@@ -382,6 +396,7 @@ function OnTick()
         coop.findNewSpawn()
         Broadcast("sync_switch_bsp " .. currentBspIndex)
     end
+    SyncDeadAI()
     if (currentScenario) then
         -- Check for device machine changes
         for objectId, group in pairs(DeviceMachinesList) do
@@ -412,9 +427,17 @@ function OnTick()
     for playerIndex = 1, 16 do
         local playerBiped = blam.biped(get_dynamic_player(playerIndex))
         if (playerBiped) then
+            local player = blam.player(get_player(playerIndex))
+            if (not isNull(playerBiped.mostRecentDamagerPlayer)) then
+                local player = blam.player(get_player(playerIndex))
+                -- Just force AI damager if the player did not damaged himself
+                if (playerBiped.mostRecentDamagerPlayer ~= player.objectId) then
+                    -- Force server to tell this player was damaged by AI
+                    playerBiped.mostRecentDamagerPlayer = 0xFFFFFFFF
+                end
+            end
             blam.bipedTag(playerBiped.tagId).disableCollision = true
             if (playerBiped.isOutSideMap) then
-                local player = blam.player(get_player(playerIndex))
                 if (not IsGameOnCinematic and player) then
                     if (isNull(playerBiped.vehicleObjectId)) then
                         delete_object(player.objectId)
