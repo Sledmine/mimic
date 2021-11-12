@@ -202,9 +202,9 @@ function core.virtualizeBiped(biped)
     biped.ignoreGravity = true
     biped.isCollideable = true
     biped.hasNoCollision = false
-    biped.zVel = 0
-    biped.xVel = 0
-    biped.yVel = 0
+    --biped.zVel = 0
+    --biped.xVel = 0
+    --biped.yVel = 0
 end
 
 --- Hide biped object from the game, apply transformations to somehow hide the specifed biped
@@ -215,9 +215,9 @@ function core.hideBiped(biped)
     biped.ignoreGravity = true
     biped.isCollideable = false
     biped.hasNoCollision = true
-    biped.zVel = 0
-    biped.xVel = 0
-    biped.yVel = 0
+    --biped.zVel = 0
+    --biped.xVel = 0
+    --biped.yVel = 0
     -- biped.x = 0
     -- biped.y = 0
     -- biped.z = 0
