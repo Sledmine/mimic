@@ -388,6 +388,7 @@ function core.adaptHSC(command)
     else
         for actionName, action in pairs(hsc) do
             if (command:find(actionName .. " ")) then
+                -- TODO Add double quotes string escaping
                 local params = split(command, " ")
                 local syncCommand = {action.packetType}
                 console_out(command)

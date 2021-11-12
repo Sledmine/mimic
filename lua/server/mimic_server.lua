@@ -104,10 +104,10 @@ function SyncAIData(playerIndex)
             if (not blam.isNull(device.nameIndex)) then
                 local name = currentScenario.objectNames[device.nameIndex + 1]
                 if (name) then
-                    Broadcast("sync_device_set_power " .. name .. " " ..
-                                  DeviceMachinesList[objectId].power)
-                    Broadcast("sync_device_set_position_immediate " .. name .. " " ..
-                                  DeviceMachinesList[objectId].position)
+                    Send(playerIndex, "sync_device_set_power " .. name .. " " ..
+                             DeviceMachinesList[objectId].power)
+                    Send(playerIndex, "sync_device_set_position_immediate " .. name .. " " ..
+                             DeviceMachinesList[objectId].position)
                 end
             end
         end
@@ -132,14 +132,14 @@ function SyncUpdateAI()
                     if (not ai.isHealthEmpty) then
                         -- Only sync bsps inside the same bsp as the players
                         if (not ai.isOutSideMap) then
-                            for playerIndex = 1, 16 do                         
+                            for playerIndex = 1, 16 do
                                 local player = blam.biped(get_dynamic_player(playerIndex))
                                 if (player) then
                                     if (blam.isNull(player.vehicleObjectId)) then
                                         if (core.objectIsNearTo(player, ai, syncRadius)) then
                                             -- FIXME Some times packet is nil, debug this
-                                            local updatePacket = core.updatePacket(
-                                                                     serverObjectId, ai)
+                                            local updatePacket =
+                                                core.updatePacket(serverObjectId, ai)
                                             if (updatePacket) then
                                                 Send(playerIndex, updatePacket)
                                             end
@@ -147,11 +147,10 @@ function SyncUpdateAI()
                                     else
                                         local vehicle = blam.object(get_object(
                                                                         player.vehicleObjectId))
-                                        if (vehicle and
-                                            core.objectIsNearTo(vehicle, ai, syncRadius)) then
+                                        if (vehicle and core.objectIsNearTo(vehicle, ai, syncRadius)) then
                                             -- FIXME Some times packet is nil, debug this
-                                            local updatePacket = core.updatePacket(
-                                                                     serverObjectId, ai)
+                                            local updatePacket =
+                                                core.updatePacket(serverObjectId, ai)
                                             if (updatePacket) then
                                                 Send(playerIndex, updatePacket)
                                             end
@@ -165,7 +164,7 @@ function SyncUpdateAI()
                                 end
                             end
                         end
-                    --elseif (ai.health <= 0) then -- Biped health does not represent real ai health
+                        -- elseif (ai.health <= 0) then -- Biped health does not represent real ai health
                     else
                         -- Biped is dead, sync dead packet, then remove it from the sync list
                         local killPacket = core.deletePacket(serverObjectId)
@@ -204,24 +203,26 @@ function SyncUpdateAI()
     return true
 end
 
-function OnPlayerPreSpawn(playerIndex)
-    timer(100, "SyncAIData", playerIndex)
-end
-
 function SyncState(playerIndex)
     -- Sync current bsp
     if (currentBspIndex) then
         Send(playerIndex, "sync_switch_bsp " .. currentBspIndex)
     end
-    -- Specifiy client to allow going trough bipeds
-    Send(playerIndex, "disable_biped_collision")
-    Broadcast("@i," .. coop.getRequiredVotes() .. ",4")
-    if (not CoopStarted) then
-        Send(playerIndex, "sync_camera_control 1")
-        Send(playerIndex, "sync_camera_set insertion_1a 0")
-        Send(playerIndex, "sync_camera_set index_drop_1a 0")
-        Send(playerIndex, "sync_camera_set insertion_1 0")
-        Send(playerIndex, "open_coop_menu")
+    local currentMapName = get_var(0, "$map")
+    if (currentMapName:find("coop_evolved")) then
+        -- Specifiy client to allow going trough bipeds
+        Send(playerIndex, "disable_biped_collision")
+        Broadcast("@i," .. coop.getRequiredVotes() .. ",4")
+        if (not CoopStarted) then
+            Send(playerIndex, "sync_camera_control 1")
+            Send(playerIndex, "sync_camera_set insertion_1a 0")
+            Send(playerIndex, "sync_camera_set index_drop_1a 0")
+            Send(playerIndex, "sync_camera_set insertion_1 0")
+            Send(playerIndex, "open_coop_menu")
+        end
+    else
+        -- Prevent going trough bipeds
+        Send(playerIndex, "enable_biped_collision")
     end
 end
 
@@ -229,6 +230,7 @@ function OnPlayerJoin(playerIndex)
     -- Set players on the same team for coop purposes
     execute_script("st " .. playerIndex .. " red")
     timer(30, "SyncState", playerIndex)
+    timer(300, "SyncAIData", playerIndex)
 end
 
 function OnPlayerLeave(playerIndex)
@@ -245,18 +247,18 @@ function OnPlayerLeave(playerIndex)
 end
 
 function OnPlayerDead(deadPlayerIndex)
-    --[[
-    local deaths = 0
-    local playersCount = tonumber(get_var(0, "$pn"))
-    local playerDeaths = tonumber(get_var(deadPlayerIndex, "$deaths"))
-    if (playerDeaths > 0) then
-       deaths = deaths + 1
+    local currentGameType = get_var(0, "$mode")
+    if (currentGameType:find("survival")) then
+        IncreaseAIHealth()
+        --local playerDeadTimes = 0
+        --local playersCount = tonumber(get_var(0, "$pn"))
+        --local player = blam.player(get_player(deadPlayerIndex))
+        --if (playerDeadTimes == playersCount) then
+        --    say_all("Game over, AI wins...")
+        --    local currentMapName = get_var(0, "$map")
+        --    execute_script("sv_map " .. currentMapName .. " " .. currentGameType)
+        --end
     end
-    if (deaths == playersCount) then
-        say_all("Game over, AI wins...")
-        execute_script("sv_map_next")
-    end
-    ]]
     coop.findNewSpawn(deadPlayerIndex)
 end
 
@@ -278,6 +280,10 @@ function ResetState()
     mapBipedTags = {}
     customPlayerBipeds = {}
     VotesList = {}
+end
+
+function OnGameEnd()
+    ResetState()
 end
 
 function OnGameStart()
@@ -349,6 +355,7 @@ function OnCommand(playerIndex, command, environment, rconPassword)
                 return false
             elseif (command:find("mspawn")) then
                 coop.enableSpawn(true)
+                say_all("Enabling all spawns by force!")
                 return false
             elseif (command:find("mbullshit")) then
                 local data = split(command:gsub("\"", ""), " ")
@@ -409,7 +416,10 @@ function OnTick()
             if (playerBiped.isOutSideMap) then
                 local player = blam.player(get_player(playerIndex))
                 if (not IsGameOnCinematic and player) then
-                    if (not isNull(playerBiped.vehicleObjectId)) then
+                    if (isNull(playerBiped.vehicleObjectId)) then
+                        delete_object(player.objectId)
+                    else
+                        exit_vehicle(playerIndex)
                         delete_object(player.objectId)
                     end
                 end
@@ -419,7 +429,6 @@ function OnTick()
     upcomingAiSpawn = core.dispatchAISpawn(upcomingAiSpawn)
 end
 
--- Put initialization code here
 function OnScriptLoad()
     passwordAddress = read_dword(sig_scan("7740BA??????008D9B000000008A01") + 0x3)
     failMessageAddress = read_dword(sig_scan("B8????????E8??000000A1????????55") + 0x1)
@@ -451,9 +460,8 @@ function OnScriptLoad()
     timer(20000, "FindNewSpawn")
     -- Set server callback
     register_callback(cb["EVENT_GAME_START"], "OnGameStart")
-    register_callback(cb["EVENT_GAME_END"], "ResetState")
+    register_callback(cb["EVENT_GAME_END"], "OnGameEnd")
     register_callback(cb["EVENT_OBJECT_SPAWN"], "OnObjectSpawn")
-    register_callback(cb["EVENT_PRESPAWN"], "OnPlayerPreSpawn")
     register_callback(cb["EVENT_JOIN"], "OnPlayerJoin")
     register_callback(cb["EVENT_LEAVE"], "OnPlayerLeave")
     register_callback(cb["EVENT_TICK"], "OnTick")
