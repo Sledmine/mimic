@@ -32,7 +32,7 @@ local bipedCleaner = true
 local bipedCleanerCycle = 20 * 1000 -- Milliseconds
 local orphanBipedsSecondsThreshold = 3
 local gameStarted = false
-local candidateThreshold = 0.45
+local candidateThreshold = 0.48
 
 -- Debug draw thing
 local aiText = ""
@@ -43,11 +43,12 @@ local textColor = {1.0, 0.45, 0.72, 1.0}
 
 -- State
 local queuePackets = {}
----@type aiData
+---@type aiData[]
 local aiList = {}
 local aiCollection = {}
 local availableBipeds = {}
 local frozenBipeds = {}
+local lastPlayerTagId
 
 function dprint(message, ...)
     if (DebugMode) then
@@ -82,6 +83,7 @@ function OnMapLoad()
     queuePackets = {}
     aiList = {}
     frozenBipeds = {}
+    lastPlayerTagId = nil
 end
 
 function CleanBipeds(serverId)
@@ -276,12 +278,15 @@ function ProcessPacket(message, packetType, packet)
                         core.revertBipedVirtualization(biped)
                         -- FIXME Bipeds stay floating after dying for some reason, fake gravity pull on dead
                         local tag = blam.getTag(biped.tagId)
-                        if (tag.path:find("sentinel")) then
-                            biped.zVel = -2
-                        end
-                        core.log("Ignoring kill packet from %s -> %s, biped is server sided",
+                        if (tag.path:find("flood")) then
+                            biped.isHealthEmpty = true
+                            core.log("kill packet from %s -> %s, server sided biped will be killed as it as a Flood biped",
                                  serverId, objectId)
-                    end
+                        else
+                            core.log("Ignoring kill packet from %s -> %s, biped is server sided",
+                                 serverId, objectId)
+                        end
+                                            end
                 end
             end
             -- Cleanup
@@ -327,12 +332,12 @@ local function onGameStart()
     end
 end
 
-local lastPlayerTagId
 function OnTick()
     if (not gameStarted) then
         onGameStart()
     end
-    if (map:find("coop_evolved")) then
+    if (map:find("coop_evolved") and gameStarted) then
+        execute_script("ai_erase_all")
         local playerBiped = blam.biped(get_dynamic_player())
         if (playerBiped) then
             if (lastPlayerTagId ~= playerBiped.tagId) then
@@ -406,10 +411,12 @@ function OnTick()
                                         end
                                         aiData.objectId = nil
                                     else
-                                        local biped = blam.biped(get_object(aiData.objectId))
-                                        if (biped) then
-                                            core.virtualizeBiped(biped)
-                                        end
+                                        local currentTime = os.time()
+                                        local timeSinceLastUpdate = currentTime - aiData.lastUpdateAt
+                                        --local biped = blam.biped(get_object(aiData.objectId))
+                                        --if (biped) then
+                                        --    core.virtualizeBiped(biped)
+                                        --end
                                     end
                                 else
                                     core.virtualizeBiped(object)
