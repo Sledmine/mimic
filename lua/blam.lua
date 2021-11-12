@@ -3,7 +3,7 @@
 -- Sledmine, JerryBrick
 -- Improves memory handle and provides standard functions for scripting
 ------------------------------------------------------------------------------
-local blam = {_VERSION = "1.4.0"}
+local blam = {_VERSION = "1.5.0-beta"}
 
 ------------------------------------------------------------------------------
 -- Useful functions for internal usage
@@ -1641,6 +1641,10 @@ local projectileStructure = extendStructure(objectStructure, {
 ---@field speed number Current speed of this player
 ---@field ping number Ping amount from server of this player in milliseconds
 ---@field kills number Kills quantity done by this player
+---@field assists number Assists count of this player
+---@field betraysAndSuicides number Betrays plus suicides count of this player
+---@field deaths number Deaths count of this player
+---@field suicides number Suicides count of this player
 
 local playerStructure = {
     id = {type = "word", offset = 0x0},
@@ -1652,7 +1656,11 @@ local playerStructure = {
     index = {type = "byte", offset = 0x67},
     speed = {type = "float", offset = 0x6C},
     ping = {type = "dword", offset = 0xDC},
-    kills = {type = "word", offset = 0x9C}
+    kills = {type = "word", offset = 0x9C},
+    assists = {type = "word", offset = 0XA4},
+    betraysAndSuicides = {type = "word", offset = 0xAC},
+    deaths = {type = "word", offset = 0xAE},
+    suicides =  {type = "word", offset = 0XB0},
 }
 
 ---@class firstPersonInterface
