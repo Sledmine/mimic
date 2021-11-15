@@ -391,7 +391,7 @@ function core.adaptHSC(command)
                 -- TODO Add double quotes string escaping
                 local params = split(command, " ")
                 local syncCommand = {action.packetType}
-                console_out(command)
+                --console_out(command)
                 for argumentIndex, arg in pairs(action.arguments) do
                     local sourceValue = params[argumentIndex + 1]
                     if (sourceValue) then
@@ -404,7 +404,7 @@ function core.adaptHSC(command)
                     end
                 end
                 local outputCommand = concat(syncCommand, ",")
-                console_out(outputCommand)
+                --console_out(outputCommand)
                 Broadcast(outputCommand)
                 return
             end

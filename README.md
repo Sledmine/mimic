@@ -6,9 +6,6 @@
     <p align="center">
        Events and AI Synchronization for Halo Custom Edition
     </p>
-    <p align="center">
-       v1.1.1
-    </p>
 </html>
 
 # About

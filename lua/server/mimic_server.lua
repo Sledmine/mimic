@@ -133,13 +133,12 @@ function SyncDeadAI()
                                 local playerName = get_var(playerIndex, "$name")
                                 local player = blam.player(get_player(playerIndex))
                                 if (player) then
-                                    for tagName, tag in pairs(mapBipedTags) do
-                                        if (tag.id == ai.tagId) then
-                                            say_all(
-                                                playerName .. " killed " .. toSentenceCase(tagName))
-                                            break
-                                        end
-                                    end
+                                    --for tagName, tag in pairs(mapBipedTags) do
+                                    --    if (tag.id == ai.tagId) then
+                                    --        say_all(playerName .. " killed " .. toSentenceCase(tagName))
+                                    --        break
+                                    --    end
+                                    --end
                                     player.kills = player.kills + 1
                                 end
                             end
