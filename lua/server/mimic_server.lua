@@ -52,7 +52,7 @@ VotesList = {}
 CoopStarted = false
 LastSyncCommand = ""
 local currentBspIndex
-local currentScenario
+CurrentScenario = nil
 
 function Broadcast(message)
     for playerIndex = 1, 16 do
@@ -102,7 +102,7 @@ function SyncAIData(playerIndex)
         if (device) then
             -- Only sync device machines that are name based due to mimic client limitations
             if (not blam.isNull(device.nameIndex)) then
-                local name = currentScenario.objectNames[device.nameIndex + 1]
+                local name = CurrentScenario.objectNames[device.nameIndex + 1]
                 if (name) then
                     Send(playerIndex, "sync_device_set_power " .. name .. " " ..
                              DeviceMachinesList[objectId].power)
@@ -133,12 +133,12 @@ function SyncDeadAI()
                                 local playerName = get_var(playerIndex, "$name")
                                 local player = blam.player(get_player(playerIndex))
                                 if (player) then
-                                    --for tagName, tag in pairs(mapBipedTags) do
+                                    -- for tagName, tag in pairs(mapBipedTags) do
                                     --    if (tag.id == ai.tagId) then
                                     --        say_all(playerName .. " killed " .. toSentenceCase(tagName))
                                     --        break
                                     --    end
-                                    --end
+                                    -- end
                                     player.kills = player.kills + 1
                                 end
                             end
@@ -158,6 +158,37 @@ function SyncDeadAI()
     end
 end
 
+local function updateAI(ai, serverObjectId)
+    for playerIndex = 1, 16 do
+        local player = blam.biped(get_dynamic_player(playerIndex))
+        if (player) then
+            if (blam.isNull(player.vehicleObjectId)) then
+                if (core.objectIsNearTo(player, ai, syncRadius)) then
+                    -- FIXME Some times packet is nil, debug this
+                    local updatePacket = core.updatePacket(serverObjectId, ai)
+                    if (updatePacket) then
+                        Send(playerIndex, updatePacket)
+                    end
+                end
+            else
+                local vehicle = blam.object(get_object(player.vehicleObjectId))
+                if (vehicle and core.objectIsNearTo(vehicle, ai, syncRadius)) then
+                    -- FIXME Some times packet is nil, debug this
+                    local updatePacket = core.updatePacket(serverObjectId, ai)
+                    if (updatePacket) then
+                        Send(playerIndex, updatePacket)
+                    end
+                end
+            end
+        else
+            -- This was disabled as this forces every biped to be synced
+            -- Resulting on really low performance
+            -- local updatePacket = core.updatePacket(serverObjectId, ai)
+            -- send(playerIndex, updatePacket)
+        end
+    end
+end
+
 function SyncUpdateAI()
     local newAiCount = #glue.keys(aiList)
     if (aiCount ~= newAiCount) then
@@ -171,45 +202,14 @@ function SyncUpdateAI()
         for serverObjectId, tagId in pairs(aiList) do
             local ai = blam.biped(get_object(serverObjectId))
             if (ai) then
-                if (blam.isNull(ai.nameIndex)) then
-                    -- Biped is alive, we need to sync it
-                    if (not ai.isHealthEmpty) then
-                        -- Only sync bsps inside the same bsp as the players
-                        if (not ai.isOutSideMap) then
-                            for playerIndex = 1, 16 do
-                                local player = blam.biped(get_dynamic_player(playerIndex))
-                                if (player) then
-                                    if (blam.isNull(player.vehicleObjectId)) then
-                                        if (core.objectIsNearTo(player, ai, syncRadius)) then
-                                            -- FIXME Some times packet is nil, debug this
-                                            local updatePacket =
-                                                core.updatePacket(serverObjectId, ai)
-                                            if (updatePacket) then
-                                                Send(playerIndex, updatePacket)
-                                            end
-                                        end
-                                    else
-                                        local vehicle = blam.object(get_object(
-                                                                        player.vehicleObjectId))
-                                        if (vehicle and core.objectIsNearTo(vehicle, ai, syncRadius)) then
-                                            -- FIXME Some times packet is nil, debug this
-                                            local updatePacket =
-                                                core.updatePacket(serverObjectId, ai)
-                                            if (updatePacket) then
-                                                Send(playerIndex, updatePacket)
-                                            end
-                                        end
-                                    end
-                                else
-                                    -- This was disabled as this forces every biped to be synced
-                                    -- Resulting on really low performance
-                                    -- local updatePacket = core.updatePacket(serverObjectId, ai)
-                                    -- send(playerIndex, updatePacket)
-                                end
-                            end
-                        end
+                -- Biped is alive, we need to sync it
+                if (not ai.isHealthEmpty) then
+                    -- Only sync bsps inside the same bsp as the players
+                    if (not ai.isOutSideMap) then
+                        updateAI(ai, serverObjectId)
                     end
                 end
+
             end
         end
     end
@@ -300,7 +300,7 @@ function OnGameEnd()
 end
 
 function OnGameStart()
-    currentScenario = blam.scenario(0)
+    CurrentScenario = blam.scenario(0)
     -- Register available bipeds on the map
     for tagIndex = 0, blam.tagDataHeader.count - 1 do
         local tag = blam.getTag(tagIndex)
@@ -396,14 +396,14 @@ function OnTick()
         Broadcast("sync_switch_bsp " .. currentBspIndex)
     end
     SyncDeadAI()
-    if (currentScenario) then
+    if (CurrentScenario) then
         -- Check for device machine changes
         for objectId, group in pairs(DeviceMachinesList) do
             local device = blam.deviceMachine(get_object(objectId))
             if (device) then
                 -- Only sync device machines that are name based due to mimic client limitations
                 if (not blam.isNull(device.nameIndex)) then
-                    local name = currentScenario.objectNames[device.nameIndex + 1]
+                    local name = CurrentScenario.objectNames[device.nameIndex + 1]
                     if (name) then
                         local currentPower = blam.getDeviceGroup(device.powerGroupIndex)
                         local currentPosition = blam.getDeviceGroup(device.positonGroupIndex)
@@ -439,7 +439,7 @@ function OnTick()
             if (playerBiped.isOutSideMap) then
                 if (not IsGameOnCinematic and player) then
                     if (isNull(playerBiped.vehicleObjectId)) then
-                        delete_object(player.objectId)
+                        -- delete_object(player.objectId)
                     else
                         exit_vehicle(playerIndex)
                         delete_object(player.objectId)

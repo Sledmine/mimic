@@ -416,9 +416,18 @@ end
 function core.dispatchAISpawn(upcomingAiSpawn)
     for objectId, tagId in pairs(upcomingAiSpawn) do
         local ai = blam.biped(get_object(objectId))
-        if (ai and not ai.isHealthEmpty and blam.isNull(ai.nameIndex)) then
-            Broadcast(core.positionPacket(objectId, ai))
-            upcomingAiSpawn[objectId] = nil
+        if (ai and not ai.isHealthEmpty) then
+            if (blam.isNull(ai.nameIndex)) then
+                Broadcast(core.positionPacket(objectId, ai))
+                upcomingAiSpawn[objectId] = nil
+            else
+                local bipedName = CurrentScenario.objectNames[ai.nameIndex + 1]
+                if (bipedName and bipedName == "captain_keyes" or bipedName == "free_marine_1" or bipedName == "free_marine_2" or bipedName == "free_marine_3") then
+                    Broadcast(core.positionPacket(objectId, ai))
+                    upcomingAiSpawn[objectId] = nil
+                    console_out("Biped " .. bipedName .. " is an exception that will be synced as AI")
+                end
+            end
         end
     end
     return upcomingAiSpawn
