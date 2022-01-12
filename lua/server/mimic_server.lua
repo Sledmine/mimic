@@ -439,7 +439,7 @@ function OnTick()
             if (playerBiped.isOutSideMap) then
                 if (not IsGameOnCinematic and player) then
                     if (isNull(playerBiped.vehicleObjectId)) then
-                        -- delete_object(player.objectId)
+                        delete_object(player.objectId)
                     else
                         exit_vehicle(playerIndex)
                         delete_object(player.objectId)
