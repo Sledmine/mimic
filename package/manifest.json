@@ -1,0 +1,19 @@
+{
+    "manifestVersion": "1.1.0",
+    "files": {},
+    "label": "mimic",
+    "version": "2.1.2",
+    "category": "script",
+    "author": "Sledmine",
+    "name": "Mimic",
+    "description": "Events and AI Synchronization for Halo Custom Edition",
+    "dependencies": [
+        {
+            "label": "chimera"
+        },
+        {
+            "label": "harmony",
+            "version": "2.0.1"
+        }
+    ]
+}
