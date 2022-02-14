@@ -3,6 +3,8 @@ local split = glue.string.split
 local tohex = glue.string.tohex
 local fromhex = glue.string.fromhex
 local append = glue.append
+local shift = glue.shift
+local map = glue.map
 
 local blam = require "blam"
 local color = require "ncolor"
@@ -202,9 +204,9 @@ function core.virtualizeBiped(biped)
     biped.ignoreGravity = true
     biped.isCollideable = true
     biped.hasNoCollision = false
-    --biped.zVel = 0
-    --biped.xVel = 0
-    --biped.yVel = 0
+    -- biped.zVel = 0
+    -- biped.xVel = 0
+    -- biped.yVel = 0
 end
 
 --- Hide biped object from the game, apply transformations to somehow hide the specifed biped
@@ -215,9 +217,9 @@ function core.hideBiped(biped)
     biped.ignoreGravity = true
     biped.isCollideable = false
     biped.hasNoCollision = true
-    --biped.zVel = 0
-    --biped.xVel = 0
-    --biped.yVel = 0
+    -- biped.zVel = 0
+    -- biped.xVel = 0
+    -- biped.yVel = 0
     -- biped.x = 0
     -- biped.y = 0
     -- biped.z = 0
@@ -328,6 +330,9 @@ function core.findTagsList(partialName, searchTagType)
     return tagsList
 end
 
+--- Process HSC code from the Harmony hook
+---@param command string
+---@return boolean
 function core.adaptHSC(command)
     -- Check if the map is trying to get a player on a vehicle
     if (command:find("unit_enter_vehicle") and command:find("player")) then
@@ -387,23 +392,36 @@ function core.adaptHSC(command)
         end
     else
         for actionName, action in pairs(hsc) do
+            -- Check if command has parameters
             if (command:find(actionName .. " ")) then
-                -- TODO Add double quotes string escaping
-                local params = split(command, " ")
-                local syncCommand = {action.packetType}
+                -- Escape spaces and quotes
+                for word in command:gmatch("'[%w _\\]+'") do
+                    local escaped = word:gsub(" ", "%%20"):gsub("'", "")
+                    command = command:gsub(word, escaped)
+                end
                 --console_out(command)
-                for argumentIndex, arg in pairs(action.arguments) do
-                    local sourceValue = params[argumentIndex + 1]
-                    if (sourceValue) then
-                        sourceValue = tostring(sourceValue):gsub("'", "")
-                        if (arg.value and arg.class) then
-                            console_out(sourceValue)
-                            sourceValue = tostring(blam.getTag(sourceValue, arg.class).id)
+
+                local commandData = split(command, " ")
+                -- Get just parameters from the entire command, remove space escaping
+                ---@type string[]
+                local params = map(shift(commandData, 1, -1), function (parameter)
+                    return parameter:gsub("%%20", " ")
+                end)
+
+                -- Structure that holds command data
+                local syncCommandData = {action.packetType}
+
+                -- Transform string parameters into blam terms, IDs, indexes, etc
+                for parameterIndex, parameter in pairs(action.parameters) do
+                    local argumentValue = params[parameterIndex]
+                    if (argumentValue) then
+                        if (parameter.value and parameter.class) then
+                            argumentValue = tostring(blam.getTag(argumentValue, parameter.class).id)
                         end
-                        append(syncCommand, sourceValue)
+                        append(syncCommandData, argumentValue)
                     end
                 end
-                local outputCommand = concat(syncCommand, ",")
+                local outputCommand = concat(syncCommandData, ",")
                 --console_out(outputCommand)
                 Broadcast(outputCommand)
                 return
@@ -422,10 +440,12 @@ function core.dispatchAISpawn(upcomingAiSpawn)
                 upcomingAiSpawn[objectId] = nil
             else
                 local bipedName = CurrentScenario.objectNames[ai.nameIndex + 1]
-                if (bipedName and bipedName == "captain_keyes" or bipedName == "free_marine_1" or bipedName == "free_marine_2" or bipedName == "free_marine_3") then
+                if (bipedName and bipedName == "captain_keyes" or bipedName == "free_marine_1" or
+                    bipedName == "free_marine_2" or bipedName == "free_marine_3") then
                     Broadcast(core.positionPacket(objectId, ai))
                     upcomingAiSpawn[objectId] = nil
-                    console_out("Biped " .. bipedName .. " is an exception that will be synced as AI")
+                    console_out("Biped " .. bipedName ..
+                                    " is an exception that will be synced as AI")
                 end
             end
         end

@@ -223,14 +223,21 @@ function SyncState(playerIndex)
     end
     local currentMapName = get_var(0, "$map")
     if (currentMapName:find("coop_evolved")) then
-        -- Specifiy client to allow going trough bipeds
+        -- Force client to allow going trough bipeds
         Send(playerIndex, "disable_biped_collision")
         Broadcast("@i," .. coop.getRequiredVotes() .. ",4")
         if (not CoopStarted) then
             Send(playerIndex, "sync_camera_control 1")
+            -- a50
+            Send(playerIndex, "sync_camera_set insertion_3 0")
+            -- b30
             Send(playerIndex, "sync_camera_set insertion_1a 0")
+            -- c10
             Send(playerIndex, "sync_camera_set index_drop_1a 0")
+            -- c20
             Send(playerIndex, "sync_camera_set insertion_1 0")
+            -- d40
+            Send(playerIndex, "sync_camera_set chief_climb_2c 0")
             Send(playerIndex, "open_coop_menu")
         end
     else
@@ -438,10 +445,8 @@ function OnTick()
             blam.bipedTag(playerBiped.tagId).disableCollision = true
             if (playerBiped.isOutSideMap) then
                 if (not IsGameOnCinematic and player) then
+                    -- TODO Add a way to respawn vehicle by force
                     if (isNull(playerBiped.vehicleObjectId)) then
-                        delete_object(player.objectId)
-                    else
-                        exit_vehicle(playerIndex)
                         delete_object(player.objectId)
                     end
                 end

@@ -276,17 +276,17 @@ function ProcessPacket(message, packetType, packet)
                 else
                     if (biped and not data.isLocal) then
                         core.revertBipedVirtualization(biped)
-                        -- FIXME Bipeds stay floating after dying for some reason, fake gravity pull on dead
                         local tag = blam.getTag(biped.tagId)
                         if (tag.path:find("flood")) then
                             biped.isHealthEmpty = true
-                            core.log("kill packet from %s -> %s, server sided biped will be killed as it as a Flood biped",
-                                 serverId, objectId)
+                            core.log(
+                                "kill packet from %s -> %s, server sided biped will be killed as it as a Flood biped",
+                                serverId, objectId)
                         else
                             core.log("Ignoring kill packet from %s -> %s, biped is server sided",
-                                 serverId, objectId)
+                                     serverId, objectId)
                         end
-                                            end
+                    end
                 end
             end
             -- Cleanup
@@ -307,7 +307,7 @@ function ProcessPacket(message, packetType, packet)
             if (packetType == action.packetType) then
                 dprint(message)
                 local syncCommand = {action.name}
-                for argumentIndex, arg in pairs(action.arguments) do
+                for argumentIndex, arg in pairs(action.parameters) do
                     local outputValue = packet[argumentIndex + 1]
                     if (arg.value and arg.class) then
                         outputValue = blam.getTag(tonumber(outputValue))[arg.value]
@@ -343,7 +343,7 @@ function OnTick()
             if (lastPlayerTagId ~= playerBiped.tagId) then
                 lastPlayerTagId = playerBiped.tagId
                 coop.swapFirstPerson()
-            end    
+            end
         end
     end
     if (lastMapName ~= map) then
@@ -412,11 +412,12 @@ function OnTick()
                                         aiData.objectId = nil
                                     else
                                         local currentTime = os.time()
-                                        local timeSinceLastUpdate = currentTime - aiData.lastUpdateAt
-                                        --local biped = blam.biped(get_object(aiData.objectId))
-                                        --if (biped) then
+                                        local timeSinceLastUpdate = currentTime -
+                                                                        aiData.lastUpdateAt
+                                        -- local biped = blam.biped(get_object(aiData.objectId))
+                                        -- if (biped) then
                                         --    core.virtualizeBiped(biped)
-                                        --end
+                                        -- end
                                     end
                                 else
                                     core.virtualizeBiped(object)
