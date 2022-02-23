@@ -1,6 +1,7 @@
 # 2.1.2
-- Fix some coop evolved maps not displaying an intro camera for biped selection
 - Add intro camera for Coop Evolved d40
+- Fix some coop evolved maps not displaying an intro camera for biped selection
+- Fix some cinematics and events not syncing correctly due to missing command escaping
 
 # 2.1.1
 - Fix for player respawn when outside bsp
