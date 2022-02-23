@@ -104,20 +104,6 @@ function CleanBipeds(serverId)
     return false
 end
 
----@param object blamObject
----@return aiData
--- local function isSyncedBiped(object)
---    for serverId, data in pairs(aiList) do
---        if (data.objectId) then
---            local aiObject = blam.object(get_object(data.objectId))
---            if (aiObject and object and aiObject.address == object.address) then
---                return data, serverId
---            end
---        end
---    end
---    return nil
--- end
-
 ---@param objectId number
 ---@return aiData
 local function getAIDataByObjectId(objectId)
@@ -305,18 +291,18 @@ function ProcessPacket(message, packetType, packet)
     else
         for actionName, action in pairs(hsc) do
             if (packetType == action.packetType) then
-                dprint(message)
-                local syncCommand = {action.name}
+                dprint("Sync packet: " .. message)
+                local syncPacket = {action.name}
                 for argumentIndex, arg in pairs(action.parameters) do
                     local outputValue = packet[argumentIndex + 1]
                     if (arg.value and arg.class) then
                         outputValue = blam.getTag(tonumber(outputValue))[arg.value]
                     end
-                    append(syncCommand, outputValue)
+                    append(syncPacket, outputValue)
                 end
-                local finalCommand = concat(syncCommand, " ")
-                dprint(finalCommand)
-                execute_script(finalCommand)
+                local localCommand = concat(syncPacket, " ")
+                dprint("Local command: " .. localCommand)
+                execute_script(localCommand)
             end
         end
     end
