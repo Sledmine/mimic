@@ -415,7 +415,7 @@ function core.adaptHSC(hscCommand)
     else
         for actionName, action in pairs(hsc) do
             -- Check if command has parameters
-            if (starts(hscCommand, actionName .. " ")) then
+            if (starts(hscCommand, "sync_" .. actionName .. " ")) then
                 -- Escape spaces and quotes
                 console_out("Raw command: " .. hscCommand)
 
