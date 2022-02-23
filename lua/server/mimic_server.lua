@@ -71,8 +71,8 @@ function SyncHSC(_, hscMimicCommand)
         LastSyncCommand = hscMimicCommand
         local syncCommand = core.adaptHSC(hscMimicCommand)
         if (syncCommand) then
-            console_out(hscMimicCommand)
-            Broadcast(hscMimicCommand)
+            console_out("Syncing: " .. syncCommand)
+            Broadcast(syncCommand)
         end
         -- Uncommenting this probably will be required for very specific hsc specific script cases
         -- execute_command("set sync_hsc_command \"\"")

@@ -1,10 +1,14 @@
 local glue = require "glue"
+local inspect = require "inspect"
 local split = glue.string.split
 local tohex = glue.string.tohex
 local fromhex = glue.string.fromhex
 local append = glue.append
 local shift = glue.shift
 local map = glue.map
+local trim = glue.string.trim
+local escape = glue.string.esc
+local starts = glue.string.starts
 
 local blam = require "blam"
 local color = require "ncolor"
@@ -302,9 +306,6 @@ function core.eulerToRotation(yaw, pitch, roll)
     return rollVector, yawVector, matrix
 end
 
-function core.eulerToRotation(matrix)
-end
-
 --- Find the path, index and id of a list of tags given partial name and tag type
 ---@param partialName string
 ---@param searchTagType string
@@ -330,13 +331,33 @@ function core.findTagsList(partialName, searchTagType)
     return tagsList
 end
 
+---Parse and strip any hsc command into individual parts
+---@param hscCommand string
+---@return string[]
+function core.parseHSC(hscCommand)
+    local parsedCommand = trim(hscCommand)
+    -- Get words only inside '' with one or more characters from the set [a-Z,0-9, ,-,_,\\]
+    for word in hscCommand:gmatch("'[%w%- _\\]+'") do
+        local fixed = word:gsub("'", ""):gsub(" ", "%%20")
+        parsedCommand = parsedCommand:gsub(escape(word), escape(fixed))
+    end
+    local commandData = split(parsedCommand, " ")
+    -- Get just parameters from the entire command, remove space escaping
+    ---@type string[]
+    local params = map(commandData, function(parameter)
+        return parameter:gsub("%%20", " ")
+    end)
+    return params
+end
+
 --- Process HSC code from the Harmony hook
----@param command string
+---@param hscCommand string
 ---@return boolean
-function core.adaptHSC(command)
+function core.adaptHSC(hscCommand)
     -- Check if the map is trying to get a player on a vehicle
-    if (command:find("unit_enter_vehicle") and command:find("player")) then
-        local params = split(command, " ")
+    if (hscCommand:find("unit_enter_vehicle") and hscCommand:find("player")) then
+        local params = core.parseHSC(hscCommand)
+
         local unitName = params[2]
         -- local playerIndex = to_player_index(tonumber(params[2], 10))
         local playerIndex = to_player_index(tonumber(unitName:gsub("player", ""), 10))
@@ -344,7 +365,7 @@ function core.adaptHSC(command)
         local seatIndex = tonumber(params[4], 10)
         for vehicleObjectId, vehicleTagId in pairs(VehiclesList) do
             local vehicle = blam.object(get_object(vehicleObjectId))
-            if (vehicle and (not blam.isNull(vehicle.nameIndex))) then
+            if (vehicle and not blam.isNull(vehicle.nameIndex)) then
                 local scenario = blam.scenario(0)
                 local objectScenarioName = scenario.objectNames[vehicle.nameIndex + 1]
                 if (objectName == objectScenarioName) then
@@ -358,13 +379,14 @@ function core.adaptHSC(command)
             end
         end
         return
-    elseif (command:find("object_create")) then
+    elseif (hscCommand:find("object_create")) then
         -- Prevent client object creation only if server creates a non biped/vehicle object
-        local params = split(command, " ")
+        local params = core.parseHSC(hscCommand)
+
         local objectName = params[2]
         for vehicleObjectId, vehicleTagId in pairs(VehiclesList) do
             local vehicle = blam.object(get_object(vehicleObjectId))
-            if (vehicle and (not blam.isNull(vehicle.nameIndex))) then
+            if (vehicle and not blam.isNull(vehicle.nameIndex)) then
                 local scenario = blam.scenario(0)
                 local objectScenarioName = scenario.objectNames[vehicle.nameIndex + 1]
                 if (objectName == objectScenarioName) then
@@ -372,18 +394,18 @@ function core.adaptHSC(command)
                 end
             end
         end
-    elseif (command:find("object_teleport") and command:find("player")) then
-        -- Cancel object teleport on client to prevent desync
+    elseif (hscCommand:find("object_teleport") and hscCommand:find("player")) then
+        -- Cancel player teleport on client to prevent desync
         return
-    elseif (command:find("nav_point")) then
+    elseif (hscCommand:find("nav_point")) then
         -- FIXME This is not working for some reason
         for playerIndex = 0, 15 do
-            Broadcast(command:gsub("player0", "player" .. playerIndex))
+            Broadcast(hscCommand:gsub("player0", "player" .. playerIndex))
         end
         return
-    elseif (command:find("camera_control")) then
+    elseif (hscCommand:find("camera_control")) then
         -- TODO Add cinematic_start and cinematic_stop for accurate cinematic determination
-        local params = split(command, " ")
+        local params = split(hscCommand, " ")
         IsGameOnCinematic = params[2] == "true"
         if (IsGameOnCinematic) then
             say_all("Warning, game is on cinematic!")
@@ -393,42 +415,33 @@ function core.adaptHSC(command)
     else
         for actionName, action in pairs(hsc) do
             -- Check if command has parameters
-            if (command:find(actionName .. " ")) then
+            if (starts(hscCommand, actionName .. " ")) then
                 -- Escape spaces and quotes
-                for word in command:gmatch("'[%w _\\]+'") do
-                    local escaped = word:gsub(" ", "%%20"):gsub("'", "")
-                    command = command:gsub(word, escaped)
-                end
-                --console_out(command)
+                console_out("Raw command: " .. hscCommand)
 
-                local commandData = split(command, " ")
-                -- Get just parameters from the entire command, remove space escaping
-                ---@type string[]
-                local params = map(shift(commandData, 1, -1), function (parameter)
-                    return parameter:gsub("%%20", " ")
-                end)
+                local params = core.parseHSC(hscCommand)
+                params = shift(params, 1, -1)
 
                 -- Structure that holds command data
-                local syncCommandData = {action.packetType}
+                local syncPacketData = {action.packetType}
 
-                -- Transform string parameters into blam terms, IDs, indexes, etc
+                -- Transform parameters into blam terms, IDs, indexes, etc
                 for parameterIndex, parameter in pairs(action.parameters) do
                     local argumentValue = params[parameterIndex]
                     if (argumentValue) then
                         if (parameter.value and parameter.class) then
                             argumentValue = tostring(blam.getTag(argumentValue, parameter.class).id)
                         end
-                        append(syncCommandData, argumentValue)
+                        append(syncPacketData, argumentValue)
                     end
                 end
-                local outputCommand = concat(syncCommandData, ",")
-                --console_out(outputCommand)
-                Broadcast(outputCommand)
-                return
+
+                local syncPacket = concat(syncPacketData, ",")
+                return syncPacket
             end
         end
     end
-    return command
+    return hscCommand
 end
 
 function core.dispatchAISpawn(upcomingAiSpawn)
