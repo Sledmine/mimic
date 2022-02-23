@@ -91,7 +91,7 @@ function coop.isRespawnCandidate(playerBiped, playerIndex, exceptionPlayer)
 end
 
 --- Update the game spawn given player biped object
----@param playerBiped blamObject
+---@param playerBiped biped
 ---@return string | nil playerUsedForSpawn
 function coop.updateSpawn(playerBiped, playerIndex)
     local playerUsedForSpawn
@@ -116,7 +116,7 @@ function coop.updateSpawn(playerBiped, playerIndex)
                 for spawnIndex, spawn in pairs(playerSpawns) do
                     playerSpawns[spawnIndex].x = vehicle.x
                     playerSpawns[spawnIndex].y = vehicle.y
-                    playerSpawns[spawnIndex].z = vehicle.z + 0.3
+                    playerSpawns[spawnIndex].z = vehicle.z + 0.6
                 end
             end
         end
@@ -145,6 +145,18 @@ function coop.findNewSpawn(exceptionPlayerIndex)
         end
     end
     return true
+end
+
+function coop.disableSpawn()
+    local scenario = blam.scenario(0)
+    if (scenario) then
+        local playerSpawns = scenario.spawnLocationList
+        for spawnIndex, spawn in pairs(playerSpawns) do
+            spawn.teamIndex = 0
+        end
+        -- Update player spawns list on the scenario
+        scenario.spawnLocationList = playerSpawns
+    end
 end
 
 function StartCoop()
