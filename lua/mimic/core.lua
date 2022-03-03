@@ -11,6 +11,7 @@ local escape = glue.string.esc
 local starts = glue.string.starts
 
 local blam = require "blam"
+local isNull = blam.isNull
 local color = require "ncolor"
 
 local strpack = string.pack
@@ -208,9 +209,6 @@ function core.virtualizeBiped(biped)
     biped.ignoreGravity = true
     biped.isCollideable = true
     biped.hasNoCollision = false
-    -- biped.zVel = 0
-    -- biped.xVel = 0
-    -- biped.yVel = 0
 end
 
 --- Hide biped object from the game, apply transformations to somehow hide the specifed biped
@@ -221,12 +219,6 @@ function core.hideBiped(biped)
     biped.ignoreGravity = true
     biped.isCollideable = false
     biped.hasNoCollision = true
-    -- biped.zVel = 0
-    -- biped.xVel = 0
-    -- biped.yVel = 0
-    -- biped.x = 0
-    -- biped.y = 0
-    -- biped.z = 0
 end
 
 --- Revert virtualization transformations
@@ -355,17 +347,16 @@ end
 ---@return boolean
 function core.adaptHSC(hscCommand)
     -- Check if the map is trying to get a player on a vehicle
-    if (hscCommand:find("unit_enter_vehicle") and hscCommand:find("player")) then
+    if (starts(hscCommand, "sync_unit_enter_vehicle") and hscCommand:find("player")) then
         local params = core.parseHSC(hscCommand)
-
         local unitName = params[2]
-        -- local playerIndex = to_player_index(tonumber(params[2], 10))
-        local playerIndex = to_player_index(tonumber(unitName:gsub("player", ""), 10))
+        local begin, last = unitName:find("player")
+        local playerIndex = to_player_index(tonumber(unitName:sub(last + 1, last + 2), 10))
         local objectName = params[3]
         local seatIndex = tonumber(params[4], 10)
         for vehicleObjectId, vehicleTagId in pairs(VehiclesList) do
             local vehicle = blam.object(get_object(vehicleObjectId))
-            if (vehicle and not blam.isNull(vehicle.nameIndex)) then
+            if (vehicle and not isNull(vehicle.nameIndex)) then
                 local scenario = blam.scenario(0)
                 local objectScenarioName = scenario.objectNames[vehicle.nameIndex + 1]
                 if (objectName == objectScenarioName) then
@@ -379,10 +370,9 @@ function core.adaptHSC(hscCommand)
             end
         end
         return
-    elseif (hscCommand:find("object_create")) then
-        -- Prevent client object creation only if server creates a non biped/vehicle object
+    elseif starts(hscCommand, "sync_object_create ") or starts(hscCommand, "sync_object_create_anew ") then
+        -- Only sync object creation if object is not a vehicle
         local params = core.parseHSC(hscCommand)
-
         local objectName = params[2]
         for vehicleObjectId, vehicleTagId in pairs(VehiclesList) do
             local vehicle = blam.object(get_object(vehicleObjectId))
@@ -394,8 +384,20 @@ function core.adaptHSC(hscCommand)
                 end
             end
         end
-    elseif (hscCommand:find("object_teleport") and hscCommand:find("player")) then
+    elseif (starts(hscCommand, "sync_object_teleport") and hscCommand:find("player")) then
         -- Cancel player teleport on client to prevent desync
+        -- TODO Remove sync for this from the Mimic adapter, it will prevent crashes on client
+        return
+    elseif (starts(hscCommand, "sync_unit_suspended") and hscCommand:find("player")) then
+        local params = core.parseHSC(hscCommand)
+        local unitName = params[2]
+        local begin, last = unitName:find("player")
+        local playerIndex = to_player_index(tonumber(unitName:sub(last + 1, last + 2), 10))
+        local playerBiped = blam.biped(get_dynamic_player(playerIndex))
+        if (playerBiped and not isNull(playerBiped.vehicleObjectId)) then
+            say_all("Erasing player vehicle...")
+            delete_object(playerBiped.vehicleObjectId)
+        end
         return
     elseif (hscCommand:find("nav_point")) then
         -- FIXME This is not working for some reason
@@ -403,7 +405,7 @@ function core.adaptHSC(hscCommand)
             Broadcast(hscCommand:gsub("player0", "player" .. playerIndex))
         end
         return
-    elseif (hscCommand:find("camera_control")) then
+    elseif starts(hscCommand, "sync_camera_control") then
         -- TODO Add cinematic_start and cinematic_stop for accurate cinematic determination
         local params = split(hscCommand, " ")
         IsGameOnCinematic = params[2] == "true"
@@ -415,7 +417,7 @@ function core.adaptHSC(hscCommand)
     else
         for actionName, action in pairs(hsc) do
             -- Check if command has parameters
-            if (starts(hscCommand, "sync_" .. actionName .. " ")) then
+            if starts(hscCommand, "sync_" .. actionName .. " ") then
                 -- Escape spaces and quotes
                 console_out("Raw command: " .. hscCommand)
 
