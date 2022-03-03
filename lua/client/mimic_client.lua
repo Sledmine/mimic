@@ -17,13 +17,15 @@ local scriptVersion = require "mimic.version"
 local glue = require "glue"
 local split = glue.string.split
 local append = glue.append
+local starts = glue.string.starts
 
 local color = require "ncolor"
 
 local concat = table.concat
 
 -- Script setting variables (do not modify them manually)
-DebugMode = false
+DebugMode = true
+DebugLevel = 1
 local lastMapName
 local enableSync = false
 local asyncMode = false
@@ -35,11 +37,14 @@ local gameStarted = false
 local candidateThreshold = 0.48
 
 -- Debug draw thing
-local aiText = ""
+local nearestAIDetails = ""
 local font = "small"
-local align = "left"
-local bounds = {left = 0, top = 0, right = 640, bottom = 200}
+local align = "center"
+local bounds = {left = 0, top = 400, right = 640, bottom = 480}
 local textColor = {1.0, 0.45, 0.72, 1.0}
+local packetCount = 0
+local packetsPerSecond = 0
+local timeSinceLastPacket = 0
 
 -- State
 local queuePackets = {}
@@ -143,7 +148,10 @@ function ProcessPacket(message, packetType, packet)
     if (not enableSync) then
         enableSync = true
     end
-    local time = os.time()
+    local currentTime = os.time()
+    if DebugMode then
+        packetCount = packetCount + 1
+    end
     -- dprint("Packet %s size: %s", packetType, #message)
     if (packetType == "@p") then
         execute_script("ai_erase_all")
@@ -179,7 +187,7 @@ function ProcessPacket(message, packetType, packet)
             -- dprint("Frozen bipeds count: %s", #glue.keys(frozenBipeds))
             aiList[serverId] = {
                 tagId = tagId,
-                lastUpdateAt = time,
+                lastUpdateAt = currentTime,
                 expectedCoordinates = {x = x, y = y, z = z}
             }
         end
@@ -205,7 +213,7 @@ function ProcessPacket(message, packetType, packet)
                 core.updateBiped(objectId, x, y, z, vX, vY, animation, animationFrame, r, g, b,
                                  invisible)
                 -- local tag = blam.getTag(tagId)
-                -- core.log("Updating %s -> %s, %s: %s %s %s", serverId, objectId, tag.path, x , y, z)
+                -- dprint("Updating %s -> %s, %s: %s %s %s", serverId, objectId, tag.path, x , y, z)
             else
                 dprint("SECOND #2 candidate search for %s...", serverId)
                 local candidateId = findBipedCandidate(aiData.expectedCoordinates, tagId)
@@ -215,7 +223,7 @@ function ProcessPacket(message, packetType, packet)
                     dprint("->> Success, found %s: %s", tag.path, candidateId)
                     aiList[serverId] = {
                         tagId = tagId,
-                        lastUpdateAt = time,
+                        lastUpdateAt = currentTime,
                         objectId = candidateId,
                         isLocal = false
                     }
@@ -236,7 +244,7 @@ function ProcessPacket(message, packetType, packet)
                     end
                 end
             end
-            aiData.lastUpdateAt = time
+            aiData.lastUpdateAt = currentTime
         end
     elseif (packetType == "@k") then
         local serverId = packet[2]
@@ -306,7 +314,7 @@ function ProcessPacket(message, packetType, packet)
             end
         end
     end
-    -- dprint("Packet processed, elapsed time: %.6f\n", os.clock() - time)
+    -- dprint("Packet processed, elapsed time: %.6f\n", os.time() - time)
 end
 
 local function onGameStart()
@@ -424,25 +432,32 @@ function OnTick()
         end
     end
     local playerBiped = blam.biped(get_dynamic_player())
-    if (DebugMode and get_player()) then
-        aiText = ""
-        for serverId, aiData in pairs(aiList) do
-            if (aiData.objectId) then
-                local ai = blam.biped(get_object(aiData.objectId))
-                if (ai and core.objectIsNearTo(ai, playerBiped, candidateThreshold * 4)) then
-                    aiText = blam.getTag(ai.tagId).path .. " -> " .. serverId .. " -> " ..
-                                 aiData.objectId .. " - " .. "local: " .. tostring(aiData.isLocal)
-                    -- local screenWidth = 640
-                    -- local screenHeight = 480
-                    -- bounds.left = screenWidth * (playerBiped.cameraX + 1.0) / 2.0
-                    -- bounds.top = screenHeight * (1.0 - ((playerBiped.cameraY + 1.0) / 2.0))
-                    -- bounds.right = bounds.left + 200
-                    -- bounds.bottom = bounds.top + 20
-                    -- dprint("%s %s", bounds.left, bounds.top)
+    if (DebugMode) then
+        if (get_player()) then
+            local currentTime = os.time()
+            if (currentTime - timeSinceLastPacket) >= 1 then
+                timeSinceLastPacket = currentTime
+                packetsPerSecond = packetCount
+                packetCount = 0
+            end
+            nearestAIDetails = ""
+            for serverId, aiData in pairs(aiList) do
+                if (aiData.objectId) then
+                    local ai = blam.biped(get_object(aiData.objectId))
+                    if (ai and core.objectIsNearTo(ai, playerBiped, candidateThreshold * 4)) then
+                        nearestAIDetails =
+                            ("%s -> serverId: %s -> localId: %s -> isLocal: %s"):format(blam.getTag(
+                                                                                          ai.tagId)
+                                                                                          .path,
+                                                                                      serverId,
+                                                                                      aiData.objectId,
+                                                                                      tostring(
+                                                                                          aiData.isLocal))
+
+                    end
                 end
             end
         end
-
     end
 end
 
@@ -499,7 +514,11 @@ function OnPacket(message)
 end
 
 function OnCommand(command)
-    if (command == "mdebug") then
+    if starts(command, "mdebug") then
+        local params = glue.string.split(command, " ")
+        if (#params > 1 and params[2]) then
+            DebugLevel = tonumber(params[2])
+        end
         DebugMode = not DebugMode
         console_out("Debug mode: " .. tostring(DebugMode))
         return false
@@ -571,8 +590,13 @@ function OnUnload()
 end
 
 function OnPreFrame()
-    draw_text(aiText, bounds.left, bounds.top, bounds.right, bounds.bottom, font, align,
+    draw_text(nearestAIDetails, bounds.left, bounds.top, bounds.right, bounds.bottom, font, align,
               table.unpack(textColor))
+    if (DebugMode and blam.isGameDedicated() or blam.isGameHost()) then
+        draw_text(("AI: %s / Packets per second: %s"):format(#glue.keys(aiList), packetsPerSecond),
+                  bounds.left, bounds.top + 30, bounds.right, bounds.bottom, font, align,
+                  table.unpack(textColor))
+    end
 end
 
 set_callback("map load", "OnMapLoad")
