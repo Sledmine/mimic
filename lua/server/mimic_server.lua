@@ -20,6 +20,7 @@ local harmonySapp = ffi.load("./harmony_s.dll")
 -- Lua modules
 local glue = require "glue"
 local split = glue.string.split
+local startswith = glue.string.starts
 
 -- Halo Custom Edition modules
 local blam = require "blam"
@@ -189,7 +190,7 @@ local function updateAI(ai, serverObjectId)
     end
 end
 
-function SyncUpdateAI()
+function SyncUpdate()
     local newAiCount = #glue.keys(aiList)
     if (aiCount ~= newAiCount) then
         aiCount = newAiCount
@@ -210,6 +211,33 @@ function SyncUpdateAI()
                     end
                 end
 
+            end
+        end
+    end
+    if (CurrentScenario) then
+        -- Check for device machine changes
+        for objectId, group in pairs(DeviceMachinesList) do
+            local device = blam.deviceMachine(get_object(objectId))
+            if (device) then
+                -- Only sync device machines that are name based due to mimic client limitations
+                if (not blam.isNull(device.nameIndex)) then
+                    local name = CurrentScenario.objectNames[device.nameIndex + 1]
+                    if (name) then
+                        local currentPower = blam.getDeviceGroup(device.powerGroupIndex)
+                        local currentPosition = blam.getDeviceGroup(device.positonGroupIndex)
+                        if (currentPower ~= group.power) then
+                            DeviceMachinesList[objectId].power = currentPower
+                            Broadcast("sync_device_set_power " .. name .. " " .. currentPower)
+                            console_out(("Sync device \"%s\" new power: %s"):format(name, currentPower))
+                        end
+                        if (currentPosition ~= group.position) then
+                            DeviceMachinesList[objectId].position = currentPosition
+                            Broadcast("sync_device_set_position " .. name .. " " .. currentPosition)
+                            console_out(("Sync device \"%s\" new position: %s"):format(name,
+                                                                                    currentPosition))
+                        end
+                    end
+                end
             end
         end
     end
@@ -356,7 +384,7 @@ function OnCommand(playerIndex, command, environment, rconPassword)
             return false
         end
         if (playerAdminLevel == 4) then
-            if (command:find("mdis")) then
+            if startswith(command, "mdis") then
                 local data = split(command:gsub("\"", ""), " ")
                 local newRadius = tonumber(data[2])
                 if (newRadius) then
@@ -365,7 +393,7 @@ function OnCommand(playerIndex, command, environment, rconPassword)
                 say_all("AI Count: " .. aiCount)
                 say_all("Mimic synchronization radius: " .. syncRadius)
                 return false
-            elseif (command:find("mrate")) then
+            elseif startswith(command, "mrate") then
                 local data = split(command:gsub("\"", ""), " ")
                 local newRate = tonumber(data[2])
                 if (newRate) then
@@ -373,11 +401,11 @@ function OnCommand(playerIndex, command, environment, rconPassword)
                 end
                 say_all("Mimic synchronization rate: " .. syncRate)
                 return false
-            elseif (command:find("mspawn")) then
+            elseif startswith(command, "mspawn") then
                 coop.enableSpawn(true)
                 say_all("Enabling all spawns by force!")
                 return false
-            elseif (command:find("mbullshit")) then
+            elseif startswith(command, "mbullshit") then
                 local data = split(command:gsub("\"", ""), " ")
                 local serverId = tonumber(data[2])
                 local biped = blam.getObject(serverId)
@@ -403,33 +431,6 @@ function OnTick()
         Broadcast("sync_switch_bsp " .. currentBspIndex)
     end
     SyncDeadAI()
-    if (CurrentScenario) then
-        -- Check for device machine changes
-        for objectId, group in pairs(DeviceMachinesList) do
-            local device = blam.deviceMachine(get_object(objectId))
-            if (device) then
-                -- Only sync device machines that are name based due to mimic client limitations
-                if (not blam.isNull(device.nameIndex)) then
-                    local name = CurrentScenario.objectNames[device.nameIndex + 1]
-                    if (name) then
-                        local currentPower = blam.getDeviceGroup(device.powerGroupIndex)
-                        local currentPosition = blam.getDeviceGroup(device.positonGroupIndex)
-                        if (currentPower ~= group.power) then
-                            DeviceMachinesList[objectId].power = currentPower
-                            Broadcast("sync_device_set_power " .. name .. " " .. currentPower)
-                            core.log(("Sync device \"%s\" new power: %s"):format(name, currentPower))
-                        end
-                        if (currentPosition ~= group.position) then
-                            DeviceMachinesList[objectId].position = currentPosition
-                            Broadcast("sync_device_set_position " .. name .. " " .. currentPosition)
-                            core.log(("Sync device \"%s\" new position: %s"):format(name,
-                                                                                    currentPosition))
-                        end
-                    end
-                end
-            end
-        end
-    end
     for playerIndex = 1, 16 do
         local playerBiped = blam.biped(get_dynamic_player(playerIndex))
         if (playerBiped) then
@@ -483,7 +484,7 @@ function OnScriptLoad()
     -- execute_script("allow_client_side_weapon_projectiles 0")
     -- Start syncing AI every amount of seconds
     FindNewSpawn = coop.findNewSpawn
-    timer(syncRate, "SyncUpdateAI")
+    timer(syncRate, "SyncUpdate")
     timer(20000, "FindNewSpawn")
     -- Set server callback
     register_callback(cb["EVENT_GAME_START"], "OnGameStart")
