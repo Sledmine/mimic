@@ -61,10 +61,12 @@ function Broadcast(message)
             rprint(playerIndex, message)
         end
     end
+    return false
 end
 
 function Send(playerIndex, message)
     rprint(playerIndex, message)
+    return false
 end
 
 function SyncHSC(_, hscMimicCommand)
@@ -194,9 +196,6 @@ function SyncUpdate()
     local newAiCount = #glue.keys(aiList)
     if (aiCount ~= newAiCount) then
         aiCount = newAiCount
-        -- syncRadius = aiCount * 0.35
-        -- core.log("Syncing %s bipeds...", aiCount)
-        -- core.log("Radius %s", syncRadius)
     end
     local playersCount = tonumber(get_var(0, "$pn"))
     if (playersCount > 0) then
@@ -205,12 +204,11 @@ function SyncUpdate()
             if (ai) then
                 -- Biped is alive, we need to sync it
                 if (not ai.isHealthEmpty) then
-                    -- Only sync bsps inside the same bsp as the players
+                    -- Only sync ai inside the same bsp as the players
                     if (not ai.isOutSideMap) then
                         updateAI(ai, serverObjectId)
                     end
                 end
-
             end
         end
     end
@@ -228,13 +226,10 @@ function SyncUpdate()
                         if (currentPower ~= group.power) then
                             DeviceMachinesList[objectId].power = currentPower
                             Broadcast("sync_device_set_power " .. name .. " " .. currentPower)
-                            console_out(("Sync device \"%s\" new power: %s"):format(name, currentPower))
                         end
                         if (currentPosition ~= group.position) then
                             DeviceMachinesList[objectId].position = currentPosition
                             Broadcast("sync_device_set_position " .. name .. " " .. currentPosition)
-                            console_out(("Sync device \"%s\" new position: %s"):format(name,
-                                                                                    currentPosition))
                         end
                     end
                 end

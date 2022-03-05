@@ -370,7 +370,8 @@ function core.adaptHSC(hscCommand)
             end
         end
         return
-    elseif starts(hscCommand, "sync_object_create ") or starts(hscCommand, "sync_object_create_anew ") then
+    elseif starts(hscCommand, "sync_object_create ") or
+        starts(hscCommand, "sync_object_create_anew ") then
         -- Only sync object creation if object is not a vehicle
         local params = core.parseHSC(hscCommand)
         local objectName = params[2]

@@ -24,7 +24,7 @@ local color = require "ncolor"
 local concat = table.concat
 
 -- Script setting variables (do not modify them manually)
-DebugMode = true
+DebugMode = false
 DebugLevel = 1
 local lastMapName
 local enableSync = false
@@ -446,14 +446,9 @@ function OnTick()
                     local ai = blam.biped(get_object(aiData.objectId))
                     if (ai and core.objectIsNearTo(ai, playerBiped, candidateThreshold * 4)) then
                         nearestAIDetails =
-                            ("%s -> serverId: %s -> localId: %s -> isLocal: %s"):format(blam.getTag(
-                                                                                          ai.tagId)
-                                                                                          .path,
-                                                                                      serverId,
-                                                                                      aiData.objectId,
-                                                                                      tostring(
-                                                                                          aiData.isLocal))
-
+                            ("%s -> serverId: %s -> localId: %s -> isLocal: %s"):format(
+                                blam.getTag(ai.tagId).path, serverId, aiData.objectId,
+                                tostring(aiData.isLocal))
                     end
                 end
             end
@@ -487,6 +482,9 @@ function OnPacket(message)
         local data = glue.string.split(message, "sync_")
         local command = data[2]:gsub("'", "\"")
         dprint("Sync command: %s", command)
+        if DebugMode then
+            packetCount = packetCount + 1
+        end
         execute_script(command)
         if (command:find("camera_set")) then
             local params = glue.string.split(command, " ")
@@ -590,9 +588,9 @@ function OnUnload()
 end
 
 function OnPreFrame()
-    draw_text(nearestAIDetails, bounds.left, bounds.top, bounds.right, bounds.bottom, font, align,
-              table.unpack(textColor))
     if (DebugMode and blam.isGameDedicated() or blam.isGameHost()) then
+        draw_text(nearestAIDetails, bounds.left, bounds.top, bounds.right, bounds.bottom, font,
+                  align, table.unpack(textColor))
         draw_text(("AI: %s / Packets per second: %s"):format(#glue.keys(aiList), packetsPerSecond),
                   bounds.left, bounds.top + 30, bounds.right, bounds.bottom, font, align,
                   table.unpack(textColor))
