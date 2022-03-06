@@ -1,3 +1,6 @@
+# 2.1.3
+- Fix debug messages appearing when they should not
+
 # 2.1.2
 - Add intro camera for Coop Evolved d40
 - Fix some coop evolved maps not displaying an intro camera for biped selection

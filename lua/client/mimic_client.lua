@@ -588,7 +588,7 @@ function OnUnload()
 end
 
 function OnPreFrame()
-    if (DebugMode and blam.isGameDedicated() or blam.isGameHost()) then
+    if (DebugMode and (blam.isGameDedicated() or blam.isGameHost())) then
         draw_text(nearestAIDetails, bounds.left, bounds.top, bounds.right, bounds.bottom, font,
                   align, table.unpack(textColor))
         draw_text(("AI: %s / Packets per second: %s"):format(#glue.keys(aiList), packetsPerSecond),
