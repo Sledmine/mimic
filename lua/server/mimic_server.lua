@@ -104,7 +104,7 @@ function SyncAIData(playerIndex)
         local device = blam.deviceMachine(get_object(objectId))
         if (device) then
             -- Only sync device machines that are name based due to mimic client limitations
-            if (not blam.isNull(device.nameIndex)) then
+            if (not isNull(device.nameIndex)) then
                 local name = CurrentScenario.objectNames[device.nameIndex + 1]
                 if (name) then
                     Send(playerIndex, "sync_device_set_power " .. name .. " " ..
@@ -123,7 +123,7 @@ function SyncDeadAI()
         for serverObjectId, tagId in pairs(aiList) do
             local ai = blam.biped(get_object(serverObjectId))
             if (ai) then
-                if (blam.isNull(ai.nameIndex)) then
+                if (isNull(ai.nameIndex)) then
                     -- Biped is alive, we need to sync it
                     if (ai.isHealthEmpty) then
                         -- Biped is dead, sync dead packet, then remove it from the sync list
@@ -131,17 +131,10 @@ function SyncDeadAI()
                         Broadcast(killPacket)
                         if (not aiCollection[serverObjectId]) then
                             local mostRecentDamagerPlayer = ai.mostRecentDamagerPlayer
-                            if (not blam.isNull(mostRecentDamagerPlayer)) then
+                            if (not isNull(mostRecentDamagerPlayer)) then
                                 local playerIndex = core.getIndexById(mostRecentDamagerPlayer) + 1
-                                local playerName = get_var(playerIndex, "$name")
                                 local player = blam.player(get_player(playerIndex))
                                 if (player) then
-                                    -- for tagName, tag in pairs(mapBipedTags) do
-                                    --    if (tag.id == ai.tagId) then
-                                    --        say_all(playerName .. " killed " .. toSentenceCase(tagName))
-                                    --        break
-                                    --    end
-                                    -- end
                                     player.kills = player.kills + 1
                                 end
                             end
@@ -165,7 +158,7 @@ local function updateAI(ai, serverObjectId)
     for playerIndex = 1, 16 do
         local player = blam.biped(get_dynamic_player(playerIndex))
         if (player) then
-            if (blam.isNull(player.vehicleObjectId)) then
+            if (isNull(player.vehicleObjectId)) then
                 if (core.objectIsNearTo(player, ai, syncRadius)) then
                     -- FIXME Some times packet is nil, debug this
                     local updatePacket = core.updatePacket(serverObjectId, ai)
@@ -218,7 +211,7 @@ function SyncUpdate()
             local device = blam.deviceMachine(get_object(objectId))
             if (device) then
                 -- Only sync device machines that are name based due to mimic client limitations
-                if (not blam.isNull(device.nameIndex)) then
+                if (not isNull(device.nameIndex)) then
                     local name = CurrentScenario.objectNames[device.nameIndex + 1]
                     if (name) then
                         local currentPower = blam.getDeviceGroup(device.powerGroupIndex)

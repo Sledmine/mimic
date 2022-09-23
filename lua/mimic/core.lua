@@ -30,7 +30,7 @@ local packetSeparator = ","
 ---@field objectIndex number
 ---@field timeSinceLastUpdate number
 
-function core.log(message, ...)
+function core.debug(message, ...)
     if (DebugMode) then
         if (...) then
             local formattedMessage = string.format(message, ...)

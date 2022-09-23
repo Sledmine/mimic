@@ -13,17 +13,14 @@ local core = require "mimic.core"
 local coop = require "mimic.coop"
 local hsc = require "mimic.hsc"
 local scriptVersion = require "mimic.version"
-
 local glue = require "glue"
 local split = glue.string.split
 local append = glue.append
 local starts = glue.string.starts
-
 local color = require "ncolor"
-
 local concat = table.concat
 
--- Script setting variables (do not modify them manually)
+-- Script settings variables (do not modify them manually)
 DebugMode = false
 DebugLevel = 1
 local lastMapName
@@ -160,30 +157,9 @@ function ProcessPacket(message, packetType, packet)
         local x = core.decode("f", packet[4])
         local y = core.decode("f", packet[5])
         local z = core.decode("f", packet[6])
-        -- if (not aiList[serverId] or (aiList[serverId] and not aiList[serverId].objectId)) then
-        -- dprint("FIRST #1 candidate search for %s...", serverId)
-        -- local candidateId = findBipedCandidate({x = x, y = y, z = z}, tagId)
-        -- if (candidateId) then
-        --    local object = blam.biped(get_object(candidateId))
-        --    local tag = blam.getTag(object.tagId)
-        --    dprint("->> Success, found %s: %s", tag.path, candidateId)
-        --    aiList[serverId] = {
-        --        tagId = tagId,
-        --        lastUpdateAt = time,
-        --        objectId = candidateId,
-        --        isLocal = false
-        --    }
-        --    object.isNotDamageable = true
-        --    object.ignoreGravity = false
-        --    object.isCollideable = true
-        --    object.hasNoCollision = false
-        --    object.isGhost = false
-        -- end
-        -- end
         if (not aiList[serverId] or (aiList[serverId] and not aiList[serverId].objectId)) then
             local tag = blam.getTag(tagId)
             dprint("Registering AI %s:%s", serverId, tag.path)
-            -- dprint("Warning, no candidate found.")
             -- dprint("Frozen bipeds count: %s", #glue.keys(frozenBipeds))
             aiList[serverId] = {
                 tagId = tagId,
@@ -215,7 +191,7 @@ function ProcessPacket(message, packetType, packet)
                 -- local tag = blam.getTag(tagId)
                 -- dprint("Updating %s -> %s, %s: %s %s %s", serverId, objectId, tag.path, x , y, z)
             else
-                dprint("SECOND #2 candidate search for %s...", serverId)
+                dprint("Candidate search for %s...", serverId)
                 local candidateId = findBipedCandidate(aiData.expectedCoordinates, tagId)
                 if (candidateId) then
                     local aiBiped = blam.biped(get_object(candidateId))
@@ -234,9 +210,10 @@ function ProcessPacket(message, packetType, packet)
                     local tag = blam.getTag(aiData.tagId)
                     dprint("Warning, biped %s, %s update mismatch, creating local biped...",
                            serverId, tag.path)
-                    aiList[serverId].objectId = core.syncBiped(tagId, x, y, z, vX, vY, animation,
-                                                               animationFrame, r, g, b, invisible)
-                    if (aiList[serverId].objectId) then
+                    local localObjectId = core.syncBiped(tagId, x, y, z, vX, vY, animation,
+                    animationFrame, r, g, b, invisible)
+                    if localObjectId then
+                        aiList[serverId].objectId = localObjectId
                         aiList[serverId].isLocal = true
                         dprint("Success, local biped created.")
                     else
@@ -256,7 +233,7 @@ function ProcessPacket(message, packetType, packet)
             if (objectId) then
                 local biped = blam.biped(get_object(objectId))
                 if (biped and not biped.isHealthEmpty and data.isLocal) then
-                    core.log("Killing biped %s", serverId)
+                    core.debug("Killing biped %s", serverId)
                     biped.health = 0
                     biped.shield = 0
                     biped.animationFrame = 0
@@ -273,11 +250,11 @@ function ProcessPacket(message, packetType, packet)
                         local tag = blam.getTag(biped.tagId)
                         if (tag.path:find("flood")) then
                             biped.isHealthEmpty = true
-                            core.log(
+                            core.debug(
                                 "kill packet from %s -> %s, server sided biped will be killed as it as a Flood biped",
                                 serverId, objectId)
                         else
-                            core.log("Ignoring kill packet from %s -> %s, biped is server sided",
+                            core.debug("Ignoring kill packet from %s -> %s, biped is server sided",
                                      serverId, objectId)
                         end
                     end
@@ -366,7 +343,7 @@ function OnTick()
                     local object = blam.biped(get_object(objectId))
                     --[[ Remove bipeds matching these conditions:
                         Is alive (has more than 0 health)
-                        Does not belongs to a player (it does not have player id)
+                        Does not belong to a player (it does not have player id)
                         Does not have a name assigned on the scenario (is not a cinematic object)
                     ]]
                     if (blam.isNull(object.playerId) and blam.isNull(object.nameIndex)) then
@@ -591,7 +568,7 @@ function OnPreFrame()
     if (DebugMode and (blam.isGameDedicated() or blam.isGameHost())) then
         draw_text(nearestAIDetails, bounds.left, bounds.top, bounds.right, bounds.bottom, font,
                   align, table.unpack(textColor))
-        draw_text(("AI: %s / Packets per second: %s"):format(#glue.keys(aiList), packetsPerSecond),
+        draw_text(("AI: %s / Packets per second: %s"):format(#glue.keys(aiList) - #glue.keys(aiCollection), packetsPerSecond),
                   bounds.left, bounds.top + 30, bounds.right, bounds.bottom, font, align,
                   table.unpack(textColor))
     end
