@@ -19,19 +19,17 @@ local append = glue.append
 local starts = glue.string.starts
 local color = require "ncolor"
 local concat = table.concat
+local constants = require "mimic.constants"
 
 -- Script settings variables (do not modify them manually)
-DebugMode = false
+DebugMode = true
 DebugLevel = 1
 local lastMapName
 local enableSync = false
 local asyncMode = false
 local disablePlayerCollision = false
 local bipedCleaner = true
-local bipedCleanerCycle = 20 * 1000 -- Milliseconds
-local orphanBipedsSecondsThreshold = 3
 local gameStarted = false
-local candidateThreshold = 0.48
 
 -- Debug draw thing
 local nearestAIDetails = ""
@@ -124,7 +122,7 @@ end
 local function findBipedCandidate(expectedCoordinates, tagId)
     for objectId, serverBiped in pairs(frozenBipeds) do
         local object = blam.biped(get_object(objectId))
-        if (object and core.objectIsNearTo(serverBiped, expectedCoordinates, candidateThreshold) and
+        if (object and core.objectIsNearTo(serverBiped, expectedCoordinates, constants.bipedCandidateThreshold) and
             serverBiped.tagId == tagId and not getAIDataByObjectId(objectId)) then
             return objectId
         end
@@ -211,7 +209,7 @@ function ProcessPacket(message, packetType, packet)
                     dprint("Warning, biped %s, %s update mismatch, creating local biped...",
                            serverId, tag.path)
                     local localObjectId = core.syncBiped(tagId, x, y, z, vX, vY, animation,
-                    animationFrame, r, g, b, invisible)
+                                                         animationFrame, r, g, b, invisible)
                     if localObjectId then
                         aiList[serverId].objectId = localObjectId
                         aiList[serverId].isLocal = true
@@ -232,38 +230,44 @@ function ProcessPacket(message, packetType, packet)
             local objectId = data.objectId
             if (objectId) then
                 local biped = blam.biped(get_object(objectId))
-                if (biped and not biped.isHealthEmpty and data.isLocal) then
-                    core.debug("Killing biped %s", serverId)
-                    biped.health = 0
-                    biped.shield = 0
-                    biped.animationFrame = 0
+                if (biped) then
+                    if data.isLocal then
+                        core.debug("Killing biped %s", serverId)
+                        biped.health = 0
+                        biped.shield = 0
+                        biped.animationFrame = 0
 
-                    biped.isNotDamageable = false
-                    biped.ignoreGravity = false
-                    biped.invisible = false
+                        biped.isNotDamageable = false
+                        biped.ignoreGravity = false
+                        biped.invisible = false
 
-                    -- Force kill prematurely
-                    biped.isHealthEmpty = true
-                else
-                    if (biped and not data.isLocal) then
+                        -- Force kill prematurely
+                        biped.isHealthEmpty = true
+                    else
                         core.revertBipedVirtualization(biped)
-                        local tag = blam.getTag(biped.tagId)
-                        if (tag.path:find("flood")) then
-                            biped.isHealthEmpty = true
-                            core.debug(
-                                "kill packet from %s -> %s, server sided biped will be killed as it as a Flood biped",
-                                serverId, objectId)
-                        else
+                        -- local tag = blam.getTag(biped.tagId)
+                        -- if (tag.path:find("flood")) then
+                        --    biped.isHealthEmpty = true
+                        --    core.debug(
+                        --        "kill packet from %s -> %s, server sided biped will be killed as it as a Flood biped",
+                        --        serverId, objectId)
+                        -- else
+                        if biped.isHealthEmpty then
                             core.debug("Ignoring kill packet from %s -> %s, biped is server sided",
-                                     serverId, objectId)
+                                       serverId, objectId)
+                        else
+                            biped.isApparentlyDead = true
                         end
+
+                        -- end
                     end
                 end
             end
             -- Cleanup
             if (bipedCleaner) then
                 if (not aiCollection[serverId]) then
-                    aiCollection[serverId] = set_timer(bipedCleanerCycle, "CleanBipeds", serverId)
+                    aiCollection[serverId] = set_timer(constants.cleanBipedsEveryMillisecs,
+                                                       "CleanBipeds", serverId)
                 end
             else
                 CleanBipeds(serverId)
@@ -372,7 +376,7 @@ function OnTick()
                                     local currentTime = os.time()
                                     local timeSinceLastUpdate = currentTime - aiData.lastUpdateAt
                                     if (aiData.objectId and timeSinceLastUpdate >
-                                        orphanBipedsSecondsThreshold) then
+                                        constants.considerOrphanBipedAfterSeconds) then
                                         local biped = blam.biped(get_object(aiData.objectId))
                                         if (biped) then
                                             local tag = blam.getTag(biped.tagId)
@@ -421,7 +425,9 @@ function OnTick()
             for serverId, aiData in pairs(aiList) do
                 if (aiData.objectId) then
                     local ai = blam.biped(get_object(aiData.objectId))
-                    if (ai and core.objectIsNearTo(ai, playerBiped, candidateThreshold * 4)) then
+                    -- if (ai and core.objectIsNearTo(ai, playerBiped, candidateThreshold * 4)) then
+                    if (ai and
+                        core.objectIsLookingAt(get_dynamic_player(), aiData.objectId, 0.5, 0, 10)) then
                         nearestAIDetails =
                             ("%s -> serverId: %s -> localId: %s -> isLocal: %s"):format(
                                 blam.getTag(ai.tagId).path, serverId, aiData.objectId,
@@ -568,9 +574,10 @@ function OnPreFrame()
     if (DebugMode and (blam.isGameDedicated() or blam.isGameHost())) then
         draw_text(nearestAIDetails, bounds.left, bounds.top, bounds.right, bounds.bottom, font,
                   align, table.unpack(textColor))
-        draw_text(("AI: %s / Packets per second: %s"):format(#glue.keys(aiList) - #glue.keys(aiCollection), packetsPerSecond),
-                  bounds.left, bounds.top + 30, bounds.right, bounds.bottom, font, align,
-                  table.unpack(textColor))
+        draw_text(("AI: %s / Packets per second: %s"):format(#glue.keys(aiList) -
+                                                                 #glue.keys(aiCollection),
+                                                             packetsPerSecond), bounds.left,
+                  bounds.top + 30, bounds.right, bounds.bottom, font, align, table.unpack(textColor))
     end
 end
 

@@ -28,11 +28,10 @@ local isNull = blam.isNull
 local core = require "mimic.core"
 local coop = require "mimic.coop"
 local toSentenceCase = core.toSentenceCase
+local constants = require "mimic.constants"
 
 -- Settings
 DebugMode = false
-local syncRadius = 30
-local syncRate = 120
 local bspIndexAddress = 0x40002CD8
 local passwordAddress
 local failMessageAddress
@@ -95,8 +94,7 @@ function SyncAIData(playerIndex)
     -- TODO Add async function for this
     for objectId in pairs(aiList) do
         local ai = blam.biped(get_object(objectId))
-        -- FIXME We need a better way to determine if a biped is DEAD for sure, server works differently
-        if (ai and not ai.isHealthEmpty) then
+        if ai then
             Send(playerIndex, core.positionPacket(objectId, ai))
         end
     end
@@ -123,12 +121,12 @@ function SyncDeadAI()
         for serverObjectId, tagId in pairs(aiList) do
             local ai = blam.biped(get_object(serverObjectId))
             if (ai) then
+                -- Biped is not a cinematic object
                 if (isNull(ai.nameIndex)) then
-                    -- Biped is alive, we need to sync it
-                    if (ai.isHealthEmpty) then
-                        -- Biped is dead, sync dead packet, then remove it from the sync list
-                        --local killPacket = core.deletePacket(serverObjectId)
-                        --Broadcast(killPacket)
+                    -- Biped is dead, send dead packet, then remove it from the sync list
+                    if (ai.isApparentlyDead and ai.health <= 0) then
+                        local killPacket = core.deletePacket(serverObjectId)
+                        Broadcast(killPacket)
                         if (not aiCollection[serverObjectId]) then
                             local mostRecentDamagerPlayer = ai.mostRecentDamagerPlayer
                             if (not isNull(mostRecentDamagerPlayer)) then
@@ -138,18 +136,16 @@ function SyncDeadAI()
                                     player.kills = player.kills + 1
                                 end
                             end
-                            -- Biped is now dead, remove it from the list
-                            -- Set that this biped already has a timer asigned for removal
-                            --aiCollection[serverObjectId] = true
-                            -- Set collector, it helps to keep sending kill packet to player
-                            --timer(150, "CleanBipeds", serverObjectId)
+                            -- Set that this biped already has a timer asigned for collection
+                            aiCollection[serverObjectId] = true
+                            -- Set collector, it helps to ensure packet is sent more than once
+                            timer(150, "CleanBipeds", serverObjectId)
                         end
                     end
                 end
             else
-                local killPacket = core.deletePacket(serverObjectId)
-                Broadcast(killPacket)
-                console_out("Biped " .. serverObjectId .. " does not exist, removing it from the list")
+                core.debug("Biped " .. serverObjectId ..
+                               " does not exist anymore, removing it from the list")
                 -- This biped does not exist anymore on the server, erase it from the list
                 aiList[serverObjectId] = nil
             end
@@ -162,7 +158,9 @@ local function updateAI(ai, serverObjectId)
         local player = blam.biped(get_dynamic_player(playerIndex))
         if (player) then
             if (isNull(player.vehicleObjectId)) then
-                if (core.objectIsNearTo(player, ai, syncRadius)) then
+                if (core.objectIsNearTo(player, ai, constants.syncDistance) and
+                    core.objectIsLookingAt(get_dynamic_player(playerIndex), serverObjectId,
+                                           constants.syncBoundingRadius, 0, constants.syncDistance)) then
                     -- FIXME Some times packet is nil, debug this
                     local updatePacket = core.updatePacket(serverObjectId, ai)
                     if (updatePacket) then
@@ -171,7 +169,7 @@ local function updateAI(ai, serverObjectId)
                 end
             else
                 local vehicle = blam.object(get_object(player.vehicleObjectId))
-                if (vehicle and core.objectIsNearTo(vehicle, ai, syncRadius)) then
+                if (vehicle and core.objectIsNearTo(vehicle, ai, constants.syncDistance)) then
                     -- FIXME Some times packet is nil, debug this
                     local updatePacket = core.updatePacket(serverObjectId, ai)
                     if (updatePacket) then
@@ -198,13 +196,10 @@ function SyncUpdate()
         for serverObjectId, tagId in pairs(aiList) do
             local ai = blam.biped(get_object(serverObjectId))
             if (ai) then
-                -- Biped is alive, we need to sync it
-                --if (not ai.isHealthEmpty) then
-                    -- Only sync ai inside the same bsp as the players
-                    if (not ai.isOutSideMap) then
-                        updateAI(ai, serverObjectId)
-                    end
-                --end
+                -- Only sync ai inside the same bsp as the players
+                if (not ai.isOutSideMap) then
+                    updateAI(ai, serverObjectId)
+                end
             end
         end
     end
@@ -262,7 +257,7 @@ function SyncState(playerIndex)
     else
         timer(3000, "StartCoop")
         -- Prevent going trough bipeds
-        --Send(playerIndex, "enable_biped_collision")
+        -- Send(playerIndex, "enable_biped_collision")
     end
 end
 
@@ -380,18 +375,18 @@ function OnCommand(playerIndex, command, environment, rconPassword)
                 local data = split(command:gsub("\"", ""), " ")
                 local newRadius = tonumber(data[2])
                 if (newRadius) then
-                    syncRadius = newRadius
+                    constants.syncDistance = newRadius
                 end
                 say_all("AI Count: " .. aiCount)
-                say_all("Mimic synchronization radius: " .. syncRadius)
+                say_all("Mimic synchronization radius: " .. constants.syncDistance)
                 return false
             elseif startswith(command, "mrate") then
                 local data = split(command:gsub("\"", ""), " ")
                 local newRate = tonumber(data[2])
                 if (newRate) then
-                    syncRate = newRate
+                    constants.syncEveryMillisecs = newRate
                 end
-                say_all("Mimic synchronization rate: " .. syncRate)
+                say_all("Mimic synchronization rate: " .. constants.syncEveryMillisecs)
                 return false
             elseif startswith(command, "mspawn") then
                 coop.enableSpawn(true)
@@ -476,7 +471,7 @@ function OnScriptLoad()
     -- execute_script("allow_client_side_weapon_projectiles 0")
     -- Start syncing AI every amount of seconds
     FindNewSpawn = coop.findNewSpawn
-    timer(syncRate, "SyncUpdate")
+    timer(constants.syncEveryMillisecs, "SyncUpdate")
     timer(20000, "FindNewSpawn")
     -- Set server callback
     register_callback(cb["EVENT_GAME_START"], "OnGameStart")

@@ -12,6 +12,7 @@
         "mimic.coop",
         "mimic.hsc",
         "mimic.version",
+        "mimic.constants",
         "ncolor"
     ],
     "main":"client/mimic_client",

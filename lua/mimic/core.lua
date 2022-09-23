@@ -469,4 +469,56 @@ function core.dispatchAISpawn(upcomingAiSpawn)
     return upcomingAiSpawn
 end
 
+local sqrt = math.sqrt
+local abs = math.abs
+local floor = math.floor
+
+--- Check if player is looking at object main frame
+---@param player number
+---@param target number
+---@param sensitivity number
+---@param zOffset number
+---@param maximumDistance number
+function core.objectIsLookingAt(player, target, sensitivity, zOffset, maximumDistance)
+    -- Minimum amount for distance scaling
+    local baselineSensitivity = 0.012
+    local function read_vector3d(Address)
+        return read_float(Address), read_float(Address + 0x4), read_float(Address + 0x8)
+    end
+    local mainObject = player
+    local targetObject = get_object(target)
+    -- Both objects must exist
+    if (targetObject and mainObject) then
+        local playerX, playerY, playerZ = read_vector3d(mainObject + 0xA0)
+        local cameraX, cameraY, cameraZ = read_vector3d(mainObject + 0x230)
+        -- Target location 2
+        local targetX, targetY, targetZ = read_vector3d(targetObject + 0x5C)
+        -- 3D distance
+        local distance = sqrt((targetX - playerX) ^ 2 + (targetY - playerY) ^ 2 +
+                                  (targetZ - playerZ) ^ 2)
+        local localX = targetX - playerX
+        local localY = targetY - playerY
+        local localZ = (targetZ + (zOffset or 0)) - playerZ
+        local pointX = 1 / distance * localX
+        local pointY = 1 / distance * localY
+        local pointZ = 1 / distance * localZ
+        local xDiff = abs(cameraX - pointX)
+        local yDiff = abs(cameraY - pointY)
+        local zDiff = abs(cameraZ - pointZ)
+        local average = (xDiff + yDiff + zDiff) / 3
+        local scaler = 0
+        if distance > 10 then
+            scaler = floor(distance) / 1000
+        end
+        local aimMagnetisim = sensitivity - scaler
+        if aimMagnetisim < baselineSensitivity then
+            aimMagnetisim = baselineSensitivity
+        end
+        if average < aimMagnetisim and distance < (maximumDistance or 15) then
+            return true
+        end
+    end
+    return false
+end
+
 return core
