@@ -1,0 +1,14 @@
+version: 1
+commands:
+  package:
+    - rm -rf dist
+    - mkdir -p dist
+    - mercury luabundle
+    - mercury luabundle server
+    - cp -f dist/mimic_client.lua package/lua-global
+    - cp -f dist/mimic_server.lua package/lua-sapp
+    - mercury pack package/ dist/
+    - rm -f package/lua-global/mimic_client.lua
+    - rm -f package/lua-sapp/mimic_server.lua
+  release:
+    - mercury build package
