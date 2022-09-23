@@ -127,8 +127,8 @@ function SyncDeadAI()
                     -- Biped is alive, we need to sync it
                     if (ai.isHealthEmpty) then
                         -- Biped is dead, sync dead packet, then remove it from the sync list
-                        local killPacket = core.deletePacket(serverObjectId)
-                        Broadcast(killPacket)
+                        --local killPacket = core.deletePacket(serverObjectId)
+                        --Broadcast(killPacket)
                         if (not aiCollection[serverObjectId]) then
                             local mostRecentDamagerPlayer = ai.mostRecentDamagerPlayer
                             if (not isNull(mostRecentDamagerPlayer)) then
@@ -140,13 +140,16 @@ function SyncDeadAI()
                             end
                             -- Biped is now dead, remove it from the list
                             -- Set that this biped already has a timer asigned for removal
-                            aiCollection[serverObjectId] = true
+                            --aiCollection[serverObjectId] = true
                             -- Set collector, it helps to keep sending kill packet to player
-                            timer(150, "CleanBipeds", serverObjectId)
+                            --timer(150, "CleanBipeds", serverObjectId)
                         end
                     end
                 end
             else
+                local killPacket = core.deletePacket(serverObjectId)
+                Broadcast(killPacket)
+                console_out("Biped " .. serverObjectId .. " does not exist, removing it from the list")
                 -- This biped does not exist anymore on the server, erase it from the list
                 aiList[serverObjectId] = nil
             end
@@ -196,12 +199,12 @@ function SyncUpdate()
             local ai = blam.biped(get_object(serverObjectId))
             if (ai) then
                 -- Biped is alive, we need to sync it
-                if (not ai.isHealthEmpty) then
+                --if (not ai.isHealthEmpty) then
                     -- Only sync ai inside the same bsp as the players
                     if (not ai.isOutSideMap) then
                         updateAI(ai, serverObjectId)
                     end
-                end
+                --end
             end
         end
     end
@@ -238,9 +241,9 @@ function SyncState(playerIndex)
         Send(playerIndex, "sync_switch_bsp " .. currentBspIndex)
     end
     local currentMapName = get_var(0, "$map")
+    -- Force client to allow going trough bipeds
+    Send(playerIndex, "disable_biped_collision")
     if (currentMapName:find("coop_evolved")) then
-        -- Force client to allow going trough bipeds
-        Send(playerIndex, "disable_biped_collision")
         Broadcast("@i," .. coop.getRequiredVotes() .. ",4")
         if (not CoopStarted) then
             Send(playerIndex, "sync_camera_control 1")
@@ -257,8 +260,9 @@ function SyncState(playerIndex)
             Send(playerIndex, "open_coop_menu")
         end
     else
+        timer(3000, "StartCoop")
         -- Prevent going trough bipeds
-        Send(playerIndex, "enable_biped_collision")
+        --Send(playerIndex, "enable_biped_collision")
     end
 end
 
