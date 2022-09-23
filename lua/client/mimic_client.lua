@@ -22,7 +22,7 @@ local concat = table.concat
 local constants = require "mimic.constants"
 
 -- Script settings variables (do not modify them manually)
-DebugMode = true
+DebugMode = false
 DebugLevel = 1
 local lastMapName
 local enableSync = false
