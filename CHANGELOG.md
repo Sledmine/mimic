@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.5] - 2022-09-28
+## Added
+- Mimic version printing on the server script
+## Fixed
+- Local AI bipeds not being erased while syncing
+- Error message about not being able to find a FP tag for Coop Evolved in other maps
+
 ## [2.1.4] - 2022-09-23
 ### Changed
 - Sync now takes player perspective to determine which bipeds should be updated, improving performance
