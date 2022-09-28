@@ -13,6 +13,7 @@
         "mimic.coop",
         "mimic.hsc",
         "mimic.constants",
+        "mimic.version",
         "ncolor"
     ],
     "main": "server/mimic_server",

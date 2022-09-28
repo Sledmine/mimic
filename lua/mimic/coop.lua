@@ -205,17 +205,21 @@ function coop.swapFirstPerson()
         if (bipedTag) then
             local tagPathSplit = glue.string.split(bipedTag.path, "\\")
             local bipedName = tagPathSplit[#tagPathSplit]
-            local fpModelTagId = blam.getTag([[[shm]\halo_1\characters\cyborg\fp\fp]],
-                                             tagClasses.gbxmodel).id
-            local fpTag = core.findTag(bipedName .. "_fp", tagClasses.gbxmodel)
-            if (fpTag) then
-                fpModelTagId = fpTag.id
-            end
-            if (fpModelTagId) then
-                -- Save default first person hands model
-                local newFirstPersonInterface = globals.firstPersonInterface
-                newFirstPersonInterface[1].firstPersonHands = fpModelTagId
-                globals.firstPersonInterface = newFirstPersonInterface
+            local defaultFpTag = blam.getTag([[[shm]\halo_1\characters\cyborg\fp\fp]],
+                                             tagClasses.gbxmodel)
+            if defaultFpTag then
+                local fpModelTagId = defaultFpTag.id
+
+                local fpTag = core.findTag(bipedName .. "_fp", tagClasses.gbxmodel)
+                if (fpTag) then
+                    fpModelTagId = fpTag.id
+                end
+                if (fpModelTagId) then
+                    -- Save default first person hands model
+                    local newFirstPersonInterface = globals.firstPersonInterface
+                    newFirstPersonInterface[1].firstPersonHands = fpModelTagId
+                    globals.firstPersonInterface = newFirstPersonInterface
+                end
             end
         end
     end

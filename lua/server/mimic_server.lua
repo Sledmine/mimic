@@ -29,6 +29,7 @@ local core = require "mimic.core"
 local coop = require "mimic.coop"
 local toSentenceCase = core.toSentenceCase
 local constants = require "mimic.constants"
+local version = require "mimic.version"
 
 -- Settings
 DebugMode = false
@@ -322,6 +323,7 @@ function OnGameEnd()
 end
 
 function OnGameStart()
+    console_out("-> Mimic version: " .. version)
     CurrentScenario = blam.scenario(0)
     -- Register available bipeds on the map
     for tagIndex = 0, blam.tagDataHeader.count - 1 do

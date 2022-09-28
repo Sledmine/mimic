@@ -122,7 +122,8 @@ end
 local function findBipedCandidate(expectedCoordinates, tagId)
     for objectId, serverBiped in pairs(frozenBipeds) do
         local object = blam.biped(get_object(objectId))
-        if (object and core.objectIsNearTo(serverBiped, expectedCoordinates, constants.bipedCandidateThreshold) and
+        if (object and
+            core.objectIsNearTo(serverBiped, expectedCoordinates, constants.bipedCandidateThreshold) and
             serverBiped.tagId == tagId and not getAIDataByObjectId(objectId)) then
             return objectId
         end
@@ -311,13 +312,17 @@ function OnTick()
     if (not gameStarted) then
         onGameStart()
     end
-    if (map:find("coop_evolved") and gameStarted) then
+    if (enableSync and gameStarted) then
+        -- Constantly erase locally created AI bipeds
         execute_script("ai_erase_all")
-        local playerBiped = blam.biped(get_dynamic_player())
-        if (playerBiped) then
-            if (lastPlayerTagId ~= playerBiped.tagId) then
-                lastPlayerTagId = playerBiped.tagId
-                coop.swapFirstPerson()
+        -- Check if map is a coop evolved map
+        if (map:find("coop_evolved")) then
+            local playerBiped = blam.biped(get_dynamic_player())
+            if (playerBiped) then
+                if (lastPlayerTagId ~= playerBiped.tagId) then
+                    lastPlayerTagId = playerBiped.tagId
+                    coop.swapFirstPerson()
+                end
             end
         end
     end
