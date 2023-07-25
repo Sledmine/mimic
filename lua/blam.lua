@@ -3,7 +3,7 @@
 -- Sledmine, JerryBrick
 -- Easier memory handle and provides standard functions for scripting
 ------------------------------------------------------------------------------
-local blam = {_VERSION = "1.6.1"}
+local blam = {_VERSION = "1.7.0"}
 
 ------------------------------------------------------------------------------
 -- Useful functions for internal usage
@@ -65,12 +65,16 @@ local addressList = {
     firstPerson = 0x40000EB8, -- from aLTis
     objectTable = 0x400506B4,
     deviceGroupsTable = 0x00816110,
-    widgetsInstance = 0x6B401C
+    widgetsInstance = 0x6B401C,
+    -- syncedNetworkObjects = 0x004F7FA2
+    syncedNetworkObjects = 0x006226F0 -- pointer
 }
 
 -- Server side addresses adjustment
 if (api_version or server_type == "sapp") then
     addressList.deviceGroupsTable = 0x006E1C50
+    addressList.objectTable = 0x4005062C
+    addressList.syncedNetworkObjects = 0x00598020 -- not pointer cause cheat engine sucks
 end
 
 -- Tag classes values
@@ -291,6 +295,36 @@ local dPadValues = {
     up = 765
 }
 
+-- Global variables
+
+---	This is the current gametype that is running. If no gametype is running, this will be set to nil
+---, possible values are: ctf, slayer, oddball, king, race.
+---@type string | nil
+gametype = gametype
+---This is the index of the local player. This is a value between 0 and 15, this value does not
+---match with player index in the server and is not instantly assigned after joining.
+---@type number | nil
+local_player_index = local_player_index
+---This is the name of the current loaded map.
+---@type string
+map = map
+---Return if the map has protected tags data.
+---@type boolean
+map_is_protected = map_is_protected
+---This is the name of the script. If the script is a global script, it will be defined as the
+---filename of the script. Otherwise, it will be the name of the map.
+---@type string
+script_name = script_name
+---This is the script type, possible values are global or map.
+---@type string
+script_type = script_type
+---@type '"none"' | '"local"' | '"dedicated"' | '"sapp"'
+server_type = server_type
+---Return whether or not the script is sandboxed. See Sandoboxed Scripts for more information.
+---@deprecated
+---@type boolean
+sandboxed = sandboxed ---@diagnostic disable-line: deprecated
+
 local backupFunctions = {}
 
 backupFunctions.console_is_open = _G.console_is_open
@@ -300,6 +334,8 @@ backupFunctions.get_global = _G.get_global
 -- backupFunctions.set_global = _G.set_global
 backupFunctions.get_tag = _G.get_tag
 backupFunctions.set_callback = _G.set_callback
+backupFunctions.set_timer = _G.set_timer
+backupFunctions.stop_timer = _G.stop_timer
 
 backupFunctions.spawn_object = _G.spawn_object
 backupFunctions.delete_object = _G.delete_object
@@ -414,8 +450,8 @@ end
 ---@param path string
 ---@return boolean
 function directory_exists(path)
-    error("Directory verifications are not supported on SAPP.. yet!")
-    return true
+    print("directory_exists", path)
+    return os.execute("dir \"" .. path .. "\" > nul") == 0
 end
 
 ---List the contents from a directory given directory path
@@ -424,7 +460,7 @@ end
 function list_directory(path)
     -- TODO This needs a way to separate folders from files
     if (path) then
-        local command = "dir " .. path .. " /B"
+        local command = "dir \"" .. path .. "\" /B"
         local pipe = io.popen(command, "r")
         if pipe then
             local output = pipe:read("*a")
@@ -464,7 +500,7 @@ end
 ---Return the memory address of a tag given tagId or tagClass and tagPath
 ---@param tagIdOrTagType string | number
 ---@param tagPath? string
----@return number
+---@return number?
 function get_tag(tagIdOrTagType, tagPath)
     if (not tagPath) then
         return lookup_tag(tagIdOrTagType)
@@ -502,7 +538,7 @@ end
 
 ---Output text to the console, optional text colors in decimal format.<br>
 ---Avoid sending console messages if console_is_open() is true to avoid annoying the player.
----@param message string
+---@param message string | number
 ---@param red? number
 ---@param green? number
 ---@param blue? number
@@ -533,13 +569,58 @@ function hud_message(message)
 end
 
 ---Set the callback for an event game from the game events available on Chimera
----@param event '"command"' | '"frame"' | '"preframe"' | '"map_load"' | '"precamera"' | '"rcon message"' | '"tick"' | '"pretick"' | '"unload"'
----@param callback string global function name to call when the event is triggered
+---@param event '"command"' | '"frame"' | '"preframe"' | '"map load"' | '"precamera"' | '"rcon message"' | '"tick"' | '"pretick"' | '"unload"'
+---@param callback string Global function name to call when the event is triggered
 function set_callback(event, callback)
-    error("Chimera events can not be used on SAPP, use register_callback instead.")
+    if event == "tick" then
+        register_callback(cb["EVENT_TICK"], callback)
+    elseif event == "pretick" then
+        error("SAPP does not support pretick event")
+    elseif event == "frame" then
+        error("SAPP does not support frame event")
+    elseif event == "preframe" then
+        error("SAPP does not support preframe event")
+    elseif event == "map_load" then
+        register_callback(cb["EVENT_GAME_START"], callback)
+    elseif event == "precamera" then
+        error("SAPP does not support precamera event")
+    elseif event == "rcon message" then
+        _G[callback .. "_rcon_message"] = function(playerIndex,
+                                                   command,
+                                                   environment,
+                                                   password)
+            return _G[callback](playerIndex, command, password)
+        end
+        register_callback(cb["EVENT_COMMAND"], callback .. "_rcon_message")
+    elseif event == "command" then
+        _G[callback .. "_command"] = function(playerIndex, command, environment)
+            return _G[callback](playerIndex, command, environment)
+        end
+        register_callback(cb["EVENT_COMMAND"], callback .. "_command")
+    elseif event == "unload" then
+        register_callback(cb["EVENT_GAME_END"], callback)
+    else
+        error("Unknown event: " .. event)
+    end
 end
 
-if (api_version) then
+---Register a timer to be called every intervalMilliseconds.<br>
+---The callback function will be called with the arguments passed after the callbackName.<br>
+---
+---**WARNING:** SAPP will not return a timerId, it will return nil instead so timers can not be stopped.
+---@param intervalMilliseconds number
+---@param globalFunctionCallbackName string
+---@vararg any
+---@return number?
+function set_timer(intervalMilliseconds, globalFunctionCallbackName, ...)
+    return timer(intervalMilliseconds, globalFunctionCallbackName, ...)
+end
+
+function stop_timer(timerId)
+    error("SAPP does not support stopping timers")
+end
+
+if api_version then
     -- Provide global server type variable on SAPP
     server_type = "sapp"
     print("Compatibility with Chimera Lua API has been loaded!")
@@ -551,6 +632,8 @@ else
     -- set_global = -- backupFunctions.set_global
     get_tag = backupFunctions.get_tag
     set_callback = backupFunctions.set_callback
+    set_timer = backupFunctions.set_timer
+    stop_timer = backupFunctions.stop_timer
     spawn_object = backupFunctions.spawn_object
     delete_object = backupFunctions.delete_object
     get_object = backupFunctions.get_object
@@ -618,7 +701,7 @@ end
 
 --- Convert tag class int to string
 ---@param tagClassInt number
----@return string
+---@return string?
 local function tagClassFromInt(tagClassInt)
     if (tagClassInt) then
         local tagClassHex = tohex(tagClassInt)
@@ -638,16 +721,18 @@ local function tagClassFromInt(tagClassInt)
     return nil
 end
 
---- Return the current existing objects in the current map, ONLY WORKS FOR CHIMERA!!!
----@return table
+--- Return a list of object indexes that are currently spawned
+---@return number[]
 function blam.getObjects()
-    local currentObjectsList = {}
-    for i = 0, 2047 do
-        if (get_object(i)) then
-            currentObjectsList[#currentObjectsList + 1] = i
+    local objects = {}
+    for objectIndex = 0, 2047 do
+        local object, objectId = blam.getObject(objectIndex)
+        if object and objectId then
+            objects[objectId] = objectIndex
+            -- objects[objectIndex] = objectId
         end
     end
-    return currentObjectsList
+    return objects
 end
 
 -- Local reference to the original console_out function
@@ -679,17 +764,19 @@ local function consoleOutput(message, ...)
         table.insert(colorARGB, 1, 1)
     end
 
-    if (isString(message)) then
-        -- Explode the string!!
-        for line in message:gmatch("([^\n]+)") do
-            -- Trim the line
-            local trimmedLine = trim(line)
+    if message then
+        if (isString(message)) then
+            -- Explode the string!!
+            for line in message:gmatch("([^\n]+)") do
+                -- Trim the line
+                local trimmedLine = trim(line)
 
-            -- Print the line
-            original_console_out(trimmedLine, table.unpack(colorARGB))
+                -- Print the line
+                original_console_out(trimmedLine, table.unpack(colorARGB))
+            end
+        else
+            original_console_out(message, table.unpack(colorARGB))
         end
-    else
-        original_console_out(message, table.unpack(colorARGB))
     end
 end
 
@@ -1085,9 +1172,30 @@ local deviceGroupsTableStructure = {
 ---@field model number Gbxmodel tag ID
 ---@field health number Current health of the object
 ---@field shield number Current shield of the object
----@field redA number Red color channel for A modifier
----@field greenA number Green color channel for A modifier
----@field blueA number Blue color channel for A modifier
+---@field colorAUpperRed number Red color channel for A modifier
+---@field colorAUpperGreen number Green color channel for A modifier
+---@field colorAUpperBlue number Blue color channel for A modifier
+---@field colorBUpperRed number Red color channel for B modifier
+---@field colorBUpperGreen number Green color channel for B modifier
+---@field colorBUpperBlue number Blue color channel for B modifier
+---@field colorCUpperRed number Red color channel for C modifier
+---@field colorCUpperGreen number Green color channel for C modifier
+---@field colorCUpperBlue number Blue color channel for C modifier
+---@field colorDUpperRed number Red color channel for D modifier
+---@field colorDUpperGreen number Green color channel for D modifier
+---@field colorDUpperBlue number Blue color channel for D modifier
+---@field colorALowerRed number Red color channel for A modifier
+---@field colorALowerGreen number Green color channel for A modifier
+---@field colorALowerBlue number Blue color channel for A modifier
+---@field colorBLowerRed number Red color channel for B modifier
+---@field colorBLowerGreen number Green color channel for B modifier
+---@field colorBLowerBlue number Blue color channel for B modifier
+---@field colorCLowerRed number Red color channel for C modifier
+---@field colorCLowerGreen number Green color channel for C modifier
+---@field colorCLowerBlue number Blue color channel for C modifier
+---@field colorDLowerRed number Red color channel for D modifier
+---@field colorDLowerGreen number Green color channel for D modifier
+---@field colorDLowerBlue number Blue color channel for D modifier
 ---@field x number Current position of the object on X axis
 ---@field y number Current position of the object on Y axis
 ---@field z number Current position of the object on Z axis
@@ -1145,9 +1253,36 @@ local objectStructure = {
     model = {type = "dword", offset = 0x34},
     health = {type = "float", offset = 0xE0},
     shield = {type = "float", offset = 0xE4},
+    ---@deprecated
     redA = {type = "float", offset = 0x1B8},
+    ---@deprecated
     greenA = {type = "float", offset = 0x1BC},
+    ---@deprecated
     blueA = {type = "float", offset = 0x1C0},
+    colorAUpperRed = {type = "float", offset = 0x188},
+    colorAUpperGreen = {type = "float", offset = 0x18C},
+    colorAUpperBlue = {type = "float", offset = 0x190},
+    colorBUpperRed = {type = "float", offset = 0x194},
+    colorBUpperGreen = {type = "float", offset = 0x198},
+    colorBUpperBlue = {type = "float", offset = 0x19C},
+    colorCUpperRed = {type = "float", offset = 0x1A0},
+    colorCUpperGreen = {type = "float", offset = 0x1A4},
+    colorCUpperBlue = {type = "float", offset = 0x1A8},
+    colorDUpperRed = {type = "float", offset = 0x1AC},
+    colorDUpperGreen = {type = "float", offset = 0x1B0},
+    colorDUpperBlue = {type = "float", offset = 0x1B4},
+    colorALowerRed = {type = "float", offset = 0x1B8},
+    colorALowerGreen = {type = "float", offset = 0x1BC},
+    colorALowerBlue = {type = "float", offset = 0x1C0},
+    colorBLowerRed = {type = "float", offset = 0x1C4},
+    colorBLowerGreen = {type = "float", offset = 0x1C8},
+    colorBLowerBlue = {type = "float", offset = 0x1CC},
+    colorCLowerRed = {type = "float", offset = 0x1D0},
+    colorCLowerGreen = {type = "float", offset = 0x1D4},
+    colorCLowerBlue = {type = "float", offset = 0x1D8},
+    colorDLowerRed = {type = "float", offset = 0x1DC},
+    colorDLowerGreen = {type = "float", offset = 0x1E0},
+    colorDLowerBlue = {type = "float", offset = 0x1E4},
     x = {type = "float", offset = 0x5C},
     y = {type = "float", offset = 0x60},
     z = {type = "float", offset = 0x64},
@@ -1933,8 +2068,13 @@ local globalsTagStructure = {
 local firstPersonStructure = {weaponObjectId = {type = "dword", offset = 0x10}}
 
 ---@class bipedTag
----@field disableCollision number Disable collision of this biped tag
-local bipedTagStructure = {disableCollision = {type = "bit", offset = 0x2F4, bitLevel = 5}}
+---@field model number Gbxmodel tag Id of this biped tag
+---@field disableCollision boolean Disable collision of this biped tag
+
+local bipedTagStructure = {
+    model = {type = "dword", offset = 0x34},
+    disableCollision = {type = "bit", offset = 0x2F4, bitLevel = 5}
+}
 
 ---@class deviceMachine : blamObject
 ---@field powerGroupIndex number Power index from the device groups table
@@ -2052,7 +2192,7 @@ function blam.isGameSAPP()
 end
 
 ---Get the current game camera type
----@return number
+---@return number?
 function blam.getCameraType()
     local camera = read_word(addressList.cameraType)
     if (camera) then
@@ -2080,6 +2220,7 @@ function blam.getJoystickInput(joystickOffset)
     -- TODO Check if it is better to return an entire table with all input values 
     joystickOffset = joystickOffset or 0
     -- Nothing is pressed by default
+    ---@type boolean | number
     local inputValue = false
     -- Look for every input from every joystick available
     for controllerId = 0, 3 do
@@ -2102,7 +2243,7 @@ end
 
 --- Create a tag object from a given address, this object can't write data to game memory
 ---@param address integer
----@return tag
+---@return tag?
 function blam.tag(address)
     if (address and address ~= 0) then
         -- Generate a new tag object from class
@@ -2114,7 +2255,7 @@ function blam.tag(address)
         -- Set up values
         tagInfo.address = address
         tagInfo.path = read_string(tagInfo.path)
-        tagInfo.class = tagClassFromInt(tagInfo.class)
+        tagInfo.class = tagClassFromInt(tagInfo.class --[[@as number]] )
 
         return tagInfo
     end
@@ -2124,7 +2265,7 @@ end
 --- Return a tag object given tagPath and tagClass or just tagId
 ---@param tagIdOrTagPath string | number
 ---@param tagClass? string
----@return tag
+---@return tag?
 function blam.getTag(tagIdOrTagPath, tagClass, ...)
     local tagId
     local tagPath
@@ -2152,47 +2293,50 @@ function blam.getTag(tagIdOrTagPath, tagClass, ...)
             tagId = read_dword(blam.tagDataHeader.array + (tagId * 0x20 + 0xC))
         end
         tagAddress = get_tag(tagId)
-    else
-        tagAddress = get_tag(tagClass, tagPath)
+    elseif (tagClass and tagPath) then
+        tagAddress = get_tag(tagClass, tagPath --[[@as string]] )
     end
 
-    return blam.tag(tagAddress)
+    if tagAddress then
+        return blam.tag(tagAddress)
+    end
 end
 
 --- Create a player object given player entry table address
----@return player
+---@param address? number
+---@return player?
 function blam.player(address)
-    if (isValid(address)) then
+    if address and isValid(address) then
         return createObject(address, playerStructure)
     end
     return nil
 end
 
 --- Create a blamObject given address
----@param address number
----@return blamObject
+---@param address? number
+---@return blamObject?
 function blam.object(address)
-    if (isValid(address)) then
+    if address and isValid(address) then
         return createObject(address, objectStructure)
     end
     return nil
 end
 
 --- Create a Projectile object given address
----@param address number
----@return projectile
+---@param address? number
+---@return projectile?
 function blam.projectile(address)
-    if (isValid(address)) then
+    if address and isValid(address) then
         return createObject(address, projectileStructure)
     end
     return nil
 end
 
 --- Create a Biped object from a given address
----@param address number
----@return biped
+---@param address? number
+---@return biped?
 function blam.biped(address)
-    if (isValid(address)) then
+    if address and isValid(address) then
         return createObject(address, bipedStructure)
     end
     return nil
@@ -2200,126 +2344,148 @@ end
 
 --- Create a biped tag from a tag path or id
 ---@param tag string | number
----@return bipedTag
+---@return bipedTag?
 function blam.bipedTag(tag)
     if (isValid(tag)) then
         local bipedTag = blam.getTag(tag, tagClasses.biped)
-        return createObject(bipedTag.data, bipedTagStructure)
+        if (bipedTag) then
+            return createObject(bipedTag.data, bipedTagStructure)
+        end
     end
     return nil
 end
 
 --- Create a Unicode String List object from a tag path or id
 ---@param tag string | number
----@return unicodeStringList
+---@return unicodeStringList?
 function blam.unicodeStringList(tag)
     if (isValid(tag)) then
         local unicodeStringListTag = blam.getTag(tag, tagClasses.unicodeStringList)
-        return createObject(unicodeStringListTag.data, unicodeStringListStructure)
+        if (unicodeStringListTag) then
+            return createObject(unicodeStringListTag.data, unicodeStringListStructure)
+        end
     end
     return nil
 end
 
 --- Create a bitmap object from a tag path or id
 ---@param tag string | number
----@return bitmap
+---@return bitmap?
 function blam.bitmap(tag)
     if (isValid(tag)) then
         local bitmapTag = blam.getTag(tag, tagClasses.bitmap)
-        return createObject(bitmapTag.data, bitmapStructure)
+        if (bitmapTag) then
+            return createObject(bitmapTag.data, bitmapStructure)
+        end
     end
 end
 
 --- Create a UI Widget Definition object from a tag path or id
 ---@param tag string | number
----@return uiWidgetDefinition
+---@return uiWidgetDefinition?
 function blam.uiWidgetDefinition(tag)
     if (isValid(tag)) then
         local uiWidgetDefinitionTag = blam.getTag(tag, tagClasses.uiWidgetDefinition)
-        return createObject(uiWidgetDefinitionTag.data, uiWidgetDefinitionStructure)
+        if (uiWidgetDefinitionTag) then
+            return createObject(uiWidgetDefinitionTag.data, uiWidgetDefinitionStructure)
+        end
     end
     return nil
 end
 
 --- Create a UI Widget Collection object from a tag path or id
 ---@param tag string | number
----@return uiWidgetCollection
+---@return uiWidgetCollection?
 function blam.uiWidgetCollection(tag)
     if (isValid(tag)) then
         local uiWidgetCollectionTag = blam.getTag(tag, tagClasses.uiWidgetCollection)
-        return createObject(uiWidgetCollectionTag.data, uiWidgetCollectionStructure)
+        if (uiWidgetCollectionTag) then
+            return createObject(uiWidgetCollectionTag.data, uiWidgetCollectionStructure)
+        end
     end
     return nil
 end
 
 --- Create a Tag Collection object from a tag path or id
 ---@param tag string | number
----@return tagCollection
+---@return tagCollection?
 function blam.tagCollection(tag)
     if (isValid(tag)) then
         local tagCollectionTag = blam.getTag(tag, tagClasses.tagCollection)
-        return createObject(tagCollectionTag.data, tagCollectionStructure)
+        if (tagCollectionTag) then
+            return createObject(tagCollectionTag.data, tagCollectionStructure)
+        end
     end
     return nil
 end
 
 --- Create a Weapon HUD Interface object from a tag path or id
 ---@param tag string | number
----@return weaponHudInterface
+---@return weaponHudInterface?
 function blam.weaponHudInterface(tag)
     if (isValid(tag)) then
         local weaponHudInterfaceTag = blam.getTag(tag, tagClasses.weaponHudInterface)
-        return createObject(weaponHudInterfaceTag.data, weaponHudInterfaceStructure)
+        if (weaponHudInterfaceTag) then
+            return createObject(weaponHudInterfaceTag.data, weaponHudInterfaceStructure)
+        end
     end
     return nil
 end
 
 --- Create a Scenario object from a tag path or id
----@param tag string | number
----@return scenario
+---@param tag? string | number
+---@return scenario?
 function blam.scenario(tag)
     local scenarioTag = blam.getTag(tag or 0, tagClasses.scenario)
-    return createObject(scenarioTag.data, scenarioStructure)
+    if (scenarioTag) then
+        return createObject(scenarioTag.data, scenarioStructure)
+    end
 end
 
 --- Create a Scenery object from a tag path or id
 ---@param tag string | number
----@return scenery
+---@return scenery?
 function blam.scenery(tag)
     if (isValid(tag)) then
         local sceneryTag = blam.getTag(tag, tagClasses.scenery)
-        return createObject(sceneryTag.data, sceneryStructure)
+        if (sceneryTag) then
+            return createObject(sceneryTag.data, sceneryStructure)
+        end
     end
     return nil
 end
 
 --- Create a Collision Geometry object from a tag path or id
 ---@param tag string | number
----@return collisionGeometry
+---@return collisionGeometry?
 function blam.collisionGeometry(tag)
     if (isValid(tag)) then
         local collisionGeometryTag = blam.getTag(tag, tagClasses.collisionGeometry)
-        return createObject(collisionGeometryTag.data, collisionGeometryStructure)
+        if (collisionGeometryTag) then
+            return createObject(collisionGeometryTag.data, collisionGeometryStructure)
+        end
     end
     return nil
 end
 
 --- Create a Model Animations object from a tag path or id
 ---@param tag string | number
----@return modelAnimations
+---@return modelAnimations?
 function blam.modelAnimations(tag)
     if (isValid(tag)) then
         local modelAnimationsTag = blam.getTag(tag, tagClasses.modelAnimations)
-        return createObject(modelAnimationsTag.data, modelAnimationsStructure)
+        if (modelAnimationsTag) then
+            return createObject(modelAnimationsTag.data, modelAnimationsStructure)
+        end
     end
     return nil
 end
 
 --- Create a Weapon object from the given object address
----@param address number
----@return weapon
+---@param address? number
+---@return weapon?
 function blam.weapon(address)
-    if (isValid(address)) then
+    if address and isValid(address) then
         return createObject(address, weaponStructure)
     end
     return nil
@@ -2327,22 +2493,26 @@ end
 
 --- Create a Weapon tag object from a tag path or id
 ---@param tag string | number
----@return weaponTag
+---@return weaponTag?
 function blam.weaponTag(tag)
     if (isValid(tag)) then
         local weaponTag = blam.getTag(tag, tagClasses.weapon)
-        return createObject(weaponTag.data, weaponTagStructure)
+        if (weaponTag) then
+            return createObject(weaponTag.data, weaponTagStructure)
+        end
     end
     return nil
 end
 
 --- Create a model (gbxmodel) object from a tag path or id
 ---@param tag string | number
----@return gbxModel
+---@return gbxModel?
 function blam.model(tag)
     if (isValid(tag)) then
         local modelTag = blam.getTag(tag, tagClasses.model)
-        return createObject(modelTag.data, modelStructure)
+        if (modelTag) then
+            return createObject(modelTag.data, modelStructure)
+        end
     end
     return nil
 end
@@ -2351,12 +2521,14 @@ blam.gbxmodel = blam.model
 
 --- Create a Globals tag object from a tag path or id, default globals path by default
 ---@param tag? string | number
----@return globalsTag
+---@return globalsTag?
 function blam.globalsTag(tag)
     local tag = tag or "globals\\globals"
     if (isValid(tag)) then
         local globalsTag = blam.getTag(tag, tagClasses.globals)
-        return createObject(globalsTag.data, globalsTagStructure)
+        if (globalsTag) then
+            return createObject(globalsTag.data, globalsTagStructure)
+        end
     end
     return nil
 end
@@ -2369,10 +2541,10 @@ function blam.firstPerson(address)
 end
 
 --- Create a Device Machine object from a given address
----@param address number
----@return deviceMachine
+---@param address? number
+---@return deviceMachine?
 function blam.deviceMachine(address)
-    if (isValid(address)) then
+    if address and isValid(address) then
         return createObject(address, deviceMachineStructure)
     end
     return nil
@@ -2380,18 +2552,21 @@ end
 
 --- Create a HUD Globals tag object from a given address
 ---@param tag string | number
----@return hudGlobals
+---@return hudGlobals?
 function blam.hudGlobals(tag)
     if (isValid(tag)) then
         local hudGlobals = blam.getTag(tag, tagClasses.hudGlobals)
-        return createObject(hudGlobals.data, hudGlobalsStructure)
+        if (hudGlobals) then
+            return createObject(hudGlobals.data, hudGlobalsStructure)
+        end
     end
     return nil
 end
 
---- Return a blam object given object index or id
+--- Return a blam object given object index or id.
+--- Also returns objectId when given an object index.
 ---@param idOrIndex number
----@return blamObject, number
+---@return blamObject?, number?
 function blam.getObject(idOrIndex)
     local objectId
     local objectAddress
@@ -2417,17 +2592,19 @@ function blam.getObject(idOrIndex)
 
         objectAddress = get_object(objectId)
 
-        return blam.object(objectAddress), objectId
+        if objectAddress then
+            return blam.object(objectAddress), objectId
+        end
     end
     return nil
 end
 
 --- Return an element from the device machines table
 ---@param index number
----@return number
+---@return number?
 function blam.getDeviceGroup(index)
     -- Get object address
-    if (index) then
+    if index then
         -- Get objects table
         local table = createObject(read_dword(addressList.deviceGroupsTable),
                                    deviceGroupsTableStructure)
@@ -2435,6 +2612,47 @@ function blam.getDeviceGroup(index)
         local itemOffset = table.elementSize * index
         local item = read_float(table.firstElementAddress + itemOffset + 0x4)
         return item
+    end
+    return nil
+end
+
+local syncedObjectsTable = {
+    maximumObjectsCount = {type = "dword", offset = 0x0},
+    initialized = {type = "byte", offset = 0xC},
+    objectsCount = {type = "dword", offset = 0x18},
+    firstElementAddress = {type = "dword", offset = 0x28}
+}
+
+--- Return an element from the synced objects table
+---@param index number
+---@return number?
+function blam.getSyncedObjectId(index)
+    if index then
+        local tableAddress
+        if server_type == "sapp" then
+            tableAddress = addressList.syncedNetworkObjects
+        else
+            tableAddress = read_dword(addressList.syncedNetworkObjects)
+        end
+
+        local syncedObjectsTable = createObject(tableAddress, syncedObjectsTable)
+
+        if not syncedObjectsTable.initialized == 1 then
+            return nil
+        end
+        -- For some reason fist element entry is always used, so we need to substract 1
+        if index >= syncedObjectsTable.maximumObjectsCount - 1 then
+            return nil
+        end
+
+        local entryOffset = 4 * index
+        -- Ignore first entry, it's always used so add 4 bytes offset
+        local entryAddress = syncedObjectsTable.firstElementAddress + entryOffset + 0x4
+        local objectId = read_dword(entryAddress)
+        if blam.isNull(objectId) then
+            return nil
+        end
+        return objectId
     end
     return nil
 end
@@ -2451,23 +2669,23 @@ local requestId = -1
 local requestPathMaxLength = 60
 ---Send a server request to current server trough rcon
 ---@param method '"GET"' | '"SEND"'
----@param url string Path or name of the resource we want to get
+---@param path string Path or name of the resource we want to get
 ---@param timeout number Time this request will wait for a response, 120ms by default
 ---@param callback function<boolean, string> Callback function to call when this response returns
 ---@param retry boolean Retry this request if timeout reaches it's limit
 ---@param params table<string, any> Optional parameters to send in the request, careful, this will create two requests, one for the resource and another one for the parameters
 ---@return boolean success
-function blam.request(method, url, timeout, callback, retry, params)
+function blam.request(method, path, timeout, callback, retry, params)
     if (server_type ~= "dedicated") then
         console_out("Warning, requests only work while connected to a dedicated server.")
     end
     if (params) then
         console_out("Warning, request params are not supported yet.")
     end
-    if (url and url:len() <= requestPathMaxLength) then
+    if (path and path:len() <= requestPathMaxLength) then
         if (method == "GET") then
             requestId = requestId + 1
-            local rconRequest = ("rcon blam ?%s?%s"):format(requestId, url)
+            local rconRequest = ("rcon blam ?%s?%s"):format(requestId, path)
             requestQueue[requestId] = {
                 requestString = rconRequest,
                 timeout = timeout or 120,
@@ -2480,6 +2698,35 @@ function blam.request(method, url, timeout, callback, retry, params)
     end
     error("Error, url can not contain more than " .. requestPathMaxLength .. " chars.")
     return false
+end
+
+---Evaluate if rcon event is a request
+---@param password string
+---@param message string
+---@return boolean
+function blam.isRequest(password, message)
+    if password == "blam" then
+        return true
+    end
+    if message:sub(1, 1) == "?" then
+        return true
+    end
+    return false
+end
+
+---Evaluate rcon event and handle it as a request
+---@param message string
+---@param password string
+---@param playerIndex number
+---@return boolean | nil
+function blam.handleRequest(message, password, playerIndex)
+    if password == "blam" then
+        if message:sub(1, 1) == "?" then
+            return false
+        end
+    end
+    -- Pass request to the server
+    return nil
 end
 
 --- Find the path, index and id of a tag given partial tag path and tag type
@@ -2512,6 +2759,15 @@ function blam.findTagsList(partialTagPath, searchTagType)
         end
     end
     return tagsList
+end
+
+local fmod = math.fmod
+function blam.getIndexById(id)
+    if id then
+        local index = fmod(id, 0x10000)
+        return index
+    end
+    return nil
 end
 
 return blam

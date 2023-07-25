@@ -28,14 +28,16 @@ function coop.enableSpawn(enableAll)
 end
 
 function coop.updateCoopInfo(newVotes, difficulty)
-    local votesStringsTag = core.findTag("coop_menu\\strings\\votes", tagClasses.unicodeStringList)
-    local difficultiesTag = core.findTag("game_difficulties", tagClasses.bitmap)
-    if (votesStringsTag and difficultiesTag) then
+    local votesStringsTag = blam.findTag("coop_menu\\strings\\votes", tagClasses.unicodeStringList)
+    local difficultiesTag = blam.findTag("game_difficulties", tagClasses.bitmap)
+    if votesStringsTag and difficultiesTag then
         local votesStrings = blam.unicodeStringList(votesStringsTag.id)
+        assert(votesStrings, "Failed to load votes strings tag")
         local newStringVotes = votesStrings.stringList
         newStringVotes[1] = tostring(newVotes)
         votesStrings.stringList = newStringVotes
         local difficultyBitmap = blam.bitmap(difficultiesTag.id)
+        assert(difficultyBitmap, "Failed to load difficulty bitmap tag")
         local newSequences = difficultyBitmap.sequences
         newSequences[1].firstBitmapIndex = difficulty - 1
         difficultyBitmap.sequences = newSequences
@@ -55,11 +57,12 @@ function coop.getRequiredVotes()
 end
 
 function coop.loadCoopMenu(open)
-    local coopMenuTag = core.findTag("coop_menu_screen", tagClasses.uiWidgetDefinition)
-    local bipedsListTag = core.findTag("coop_menu\\strings\\buttons", tagClasses.unicodeStringList)
+    local coopMenuTag = blam.findTag("coop_menu_screen", tagClasses.uiWidgetDefinition)
+    local bipedsListTag = blam.findTag("coop_menu\\strings\\buttons", tagClasses.unicodeStringList)
     if (coopMenuTag and bipedsListTag) then
-        local bipedTags = core.findTagsList("_mp", tagClasses.biped)
+        local bipedTags = blam.findTagsList("_mp", tagClasses.biped)
         local bipedsList = blam.unicodeStringList(bipedsListTag.id)
+        assert(bipedsList, "Failed to load bipeds list tag")
         local newBipeds = bipedsList.stringList
         for index, tag in pairs(bipedTags) do
             local tagPath = tag.path
@@ -78,7 +81,7 @@ end
 --- Determine if this player is a candidate for respawn point
 ---@param playerBiped blamObject
 ---@param playerIndex number
----@param exceptionPlayer number
+---@param exceptionPlayer? number
 ---@return boolean isCandidate
 function coop.isRespawnCandidate(playerBiped, playerIndex, exceptionPlayer)
     if (playerBiped) then
@@ -210,7 +213,7 @@ function coop.swapFirstPerson()
             if defaultFpTag then
                 local fpModelTagId = defaultFpTag.id
 
-                local fpTag = core.findTag(bipedName .. "_fp", tagClasses.gbxmodel)
+                local fpTag = blam.findTag(bipedName .. "_fp", tagClasses.gbxmodel)
                 if (fpTag) then
                     fpModelTagId = fpTag.id
                 end

@@ -18,9 +18,9 @@ void set_hs_globals_set_callback(void (*callback)(void));
 local harmonySapp = ffi.load("./harmony_s.dll")
 
 -- Lua modules
-local glue = require "glue"
-local split = glue.string.split
-local startswith = glue.string.starts
+local luna = require "luna"
+local split = luna.string.split
+local startswith = string.startswith
 
 -- Halo Custom Edition modules
 local blam = require "blam"
@@ -83,7 +83,7 @@ function SyncHSC(_, hscMimicCommand)
 end
 
 function CleanBipeds(strServerObjectId)
-    local serverObjectId = tonumber(strServerObjectId)
+    local serverObjectId = tonumber(strServerObjectId) --[[@as number]]
     -- console_out("Cleaning biped " .. serverObjectId)
     aiCollection[serverObjectId] = nil
     aiList[serverObjectId] = nil
@@ -157,11 +157,12 @@ end
 local function updateAI(ai, serverObjectId)
     for playerIndex = 1, 16 do
         local player = blam.biped(get_dynamic_player(playerIndex))
-        if (player) then
-            if (isNull(player.vehicleObjectId)) then
+        if player then
+            if isNull(player.vehicleObjectId) then
                 if (core.objectIsNearTo(player, ai, constants.syncDistance) and
-                    core.objectIsLookingAt(get_dynamic_player(playerIndex), serverObjectId,
-                                           constants.syncBoundingRadius, 0, constants.syncDistance)) then
+                    core.objectIsLookingAt(get_dynamic_player(playerIndex) --[[@as number]] ,
+                                           serverObjectId, constants.syncBoundingRadius, 0,
+                                           constants.syncDistance)) then
                     -- FIXME Some times packet is nil, debug this
                     local updatePacket = core.updatePacket(serverObjectId, ai)
                     if (updatePacket) then
@@ -170,10 +171,11 @@ local function updateAI(ai, serverObjectId)
                 end
             else
                 local vehicle = blam.object(get_object(player.vehicleObjectId))
-                if (vehicle and core.objectIsNearTo(vehicle, ai, constants.syncDistance)) then
+                if vehicle and core.objectIsNearTo(vehicle, ai, constants.syncDistance) then
                     -- FIXME Some times packet is nil, debug this
+                    -- I think it is fixed now?? see return comment in the inner function
                     local updatePacket = core.updatePacket(serverObjectId, ai)
-                    if (updatePacket) then
+                    if updatePacket then
                         Send(playerIndex, updatePacket)
                     end
                 end
@@ -188,8 +190,8 @@ local function updateAI(ai, serverObjectId)
 end
 
 function SyncUpdate()
-    local newAiCount = #glue.keys(aiList)
-    if (aiCount ~= newAiCount) then
+    local newAiCount = #table.keys(aiList)
+    if aiCount ~= newAiCount then
         aiCount = newAiCount
     end
     local playersCount = tonumber(get_var(0, "$pn"))
@@ -204,15 +206,15 @@ function SyncUpdate()
             end
         end
     end
-    if (CurrentScenario) then
+    if CurrentScenario then
         -- Check for device machine changes
         for objectId, group in pairs(DeviceMachinesList) do
             local device = blam.deviceMachine(get_object(objectId))
-            if (device) then
+            if device then
                 -- Only sync device machines that are name based due to mimic client limitations
-                if (not isNull(device.nameIndex)) then
+                if not isNull(device.nameIndex) then
                     local name = CurrentScenario.objectNames[device.nameIndex + 1]
-                    if (name) then
+                    if name then
                         local currentPower = blam.getDeviceGroup(device.powerGroupIndex)
                         local currentPosition = blam.getDeviceGroup(device.positonGroupIndex)
                         if (currentPower ~= group.power) then
@@ -233,15 +235,15 @@ end
 
 function SyncState(playerIndex)
     -- Sync current bsp
-    if (currentBspIndex) then
+    if currentBspIndex then
         Send(playerIndex, "sync_switch_bsp " .. currentBspIndex)
     end
     local currentMapName = get_var(0, "$map")
     -- Force client to allow going trough bipeds
     Send(playerIndex, "disable_biped_collision")
-    if (currentMapName:find("coop_evolved")) then
+    if currentMapName:find("coop_evolved") then
         Broadcast("@i," .. coop.getRequiredVotes() .. ",4")
-        if (not CoopStarted) then
+        if not CoopStarted then
             Send(playerIndex, "sync_camera_control 1")
             -- a50
             Send(playerIndex, "sync_camera_set insertion_3 0")
@@ -266,7 +268,7 @@ function OnPlayerJoin(playerIndex)
     -- Set players on the same team for coop purposes
     execute_script("st " .. playerIndex .. " red")
     timer(30, "SyncState", playerIndex)
-    timer(300, "SyncAIData", playerIndex)
+    timer(3000, "SyncAIData", playerIndex)
 end
 
 function OnPlayerLeave(playerIndex)
@@ -276,7 +278,7 @@ function OnPlayerLeave(playerIndex)
         customPlayerBipeds[playerIndex] = nil
     end
     ]]
-    if (not CoopStarted) then
+    if not CoopStarted then
         VotesList[playerIndex] = nil
     end
     coop.findNewSpawn(playerIndex)
@@ -301,7 +303,7 @@ end
 function IncreaseAIHealth()
     for serverObjectId, tagId in pairs(aiList) do
         local biped = blam.biped(get_object(serverObjectId))
-        if (biped and not biped.isHealthEmpty) then
+        if biped and not biped.isApparentlyDead then
             biped.health = biped.health + 0.5
         end
     end
@@ -322,14 +324,30 @@ function OnGameEnd()
     ResetState()
 end
 
+function kk()
+    console_out("---------------------- SYNCED OBJECTS ----------------------")
+    for i = 0, 509 do
+        local objectId = blam.getSyncedObjectId(i)
+        if objectId and not blam.isNull(objectId) then
+            local objectAddress = get_object(objectId)
+            local object = blam.object(objectAddress)
+            assert(object, "Object not found")
+            local format = "[%s] - %s ID: %s"
+            console_out(format:format(i, blam.getTag(object.tagId).path, objectId))
+        end
+    end
+    return true
+end
+
 function OnGameStart()
+    timer(1000, "kk")
     console_out("-> Mimic version: " .. version)
     CurrentScenario = blam.scenario(0)
     -- Register available bipeds on the map
     for tagIndex = 0, blam.tagDataHeader.count - 1 do
         local tag = blam.getTag(tagIndex)
         if (tag and tag.class == blam.tagClasses.biped) then
-            local pathSplit = glue.string.split(tag.path, "\\")
+            local pathSplit = tag.path:split("\\")
             local tagFileName = pathSplit[#pathSplit]
             mapBipedTags[tagFileName] = tag
         end
@@ -356,9 +374,12 @@ function OnCommand(playerIndex, command, environment, rconPassword)
                                 Send(playerIndex, "New biped selected!")
                                 customPlayerBipeds[playerIndex] = bipedTag
                                 local player = blam.player(get_player(playerIndex))
-                                local playerBiped = blam.biped(get_object(player.objectId))
-                                if (playerBiped) then
-                                    delete_object(player.objectId)
+                                if player then
+                                    local biped = blam.biped(get_object(player.objectId))
+                                    if biped then
+                                        -- Force player respawn to update biped
+                                        delete_object(player.objectId)
+                                    end
                                 end
                                 return false
                             end
@@ -396,10 +417,11 @@ function OnCommand(playerIndex, command, environment, rconPassword)
                 return false
             elseif startswith(command, "mbullshit") then
                 local data = split(command:gsub("\"", ""), " ")
-                local serverId = tonumber(data[2])
+                local serverId = tonumber(data[2]) --[[@as number]]
                 local biped = blam.getObject(serverId)
-                local tag = blam.getTag(biped.tagId)
-                if (biped) then
+                if biped then
+                    local tag = blam.getTag(biped.tagId)
+                    assert(tag, "Biped tag not found")
                     Send(playerIndex, tag.path .. " - HP: " .. biped.health)
                 else
                     Send(playerIndex, "Warning, biped does not exist on the server.")
@@ -413,7 +435,7 @@ end
 function OnTick()
     -- Check for BSP Changes
     local bspIndex = read_byte(bspIndexAddress)
-    if (bspIndex ~= currentBspIndex) then
+    if bspIndex ~= currentBspIndex then
         currentBspIndex = bspIndex
         console_out("New bsp index detected: " .. currentBspIndex)
         coop.findNewSpawn()
@@ -422,14 +444,16 @@ function OnTick()
     SyncDeadAI()
     for playerIndex = 1, 16 do
         local playerBiped = blam.biped(get_dynamic_player(playerIndex))
-        if (playerBiped) then
+        if playerBiped then
             local player = blam.player(get_player(playerIndex))
-            if (not isNull(playerBiped.mostRecentDamagerPlayer)) then
+            if not isNull(playerBiped.mostRecentDamagerPlayer) then
                 local player = blam.player(get_player(playerIndex))
                 -- Just force AI damager if the player did not damaged himself
-                if (playerBiped.mostRecentDamagerPlayer ~= player.objectId) then
-                    -- Force server to tell this player was damaged by AI
-                    playerBiped.mostRecentDamagerPlayer = 0xFFFFFFFF
+                if player then
+                    if playerBiped.mostRecentDamagerPlayer ~= player.objectId then
+                        -- Force server to tell this player was damaged by AI
+                        playerBiped.mostRecentDamagerPlayer = 0xFFFFFFFF
+                    end
                 end
             end
             blam.bipedTag(playerBiped.tagId).disableCollision = true
@@ -447,6 +471,8 @@ function OnTick()
 end
 
 function OnScriptLoad()
+    cprint("Register network index: " .. sig_scan("55568B70588A460C8D6E0C5783CFFF3C0175"))
+    cprint("Synced table: " .. sig_scan("????????8B52288B348A"))
     passwordAddress = read_dword(sig_scan("7740BA??????008D9B000000008A01") + 0x3)
     failMessageAddress = read_dword(sig_scan("B8????????E8??000000A1????????55") + 0x1)
     if (passwordAddress and failMessageAddress) then
@@ -491,6 +517,8 @@ end
 function OnObjectSpawn(playerIndex, tagId, parentId, objectId)
     local tag = blam.getTag(tagId)
     if (tag) then
+        cprint("Index: " .. blam.getIndexById(objectId) .. " - " .. tag.path .. " - " .. objectId ..
+                   " Parent: " .. parentId .. " - " .. tag.class)
         if (tag.class == blam.tagClasses.biped) then
             if (playerIndex == 0) then
                 aiList[objectId] = tagId

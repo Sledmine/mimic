@@ -105,7 +105,7 @@ function CleanBipeds(serverId)
 end
 
 ---@param objectId number
----@return aiData
+---@return aiData?, number?
 local function getAIDataByObjectId(objectId)
     for serverId, aiData in pairs(aiList) do
         if (aiData.objectId) then
@@ -499,8 +499,11 @@ function OnPacket(message)
     end
 end
 
+--- OnCommand
+---@param command string
+---@return boolean
 function OnCommand(command)
-    if starts(command, "mdebug") then
+    if starts(command, "mdebug") or starts(command, "mimic_debug") then
         local params = glue.string.split(command, " ")
         if (#params > 1 and params[2]) then
             DebugLevel = tonumber(params[2])

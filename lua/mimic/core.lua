@@ -24,12 +24,6 @@ local core = {}
 local lastLog = ""
 local packetSeparator = ","
 
----@class aiData
----@field tagId number
----@field objectId number
----@field objectIndex number
----@field timeSinceLastUpdate number
-
 function core.debug(message, ...)
     if (DebugMode) then
         if (...) then
@@ -109,8 +103,9 @@ function core.updatePacket(serverId, biped)
         }, packetSeparator)
     else
         local vehicle = blam.object(get_object(biped.vehicleObjectId))
-        if (vehicle) then
-            concat({
+        if vehicle then
+            -- TODO Check if this somehow works cause it used to be not returned from the function
+            return concat({
                 "@u",
                 serverId,
                 encode("f", vehicle.x),
@@ -231,27 +226,6 @@ function core.revertBipedVirtualization(biped)
     biped.hasNoCollision = false
 end
 
---- Find the path, index and id of a tag given partial name and tag type
----@param partialName string
----@param searchTagType string
----@return tag tag
-function core.findTag(partialName, searchTagType)
-    for tagIndex = 0, blam.tagDataHeader.count - 1 do
-        local tag = blam.getTag(tagIndex)
-        if (tag and tag.path:find(partialName) and tag.class == searchTagType) then
-            return {
-                id = tag.id,
-                path = tag.path,
-                index = tag.index,
-                class = tag.class,
-                indexed = tag.indexed,
-                data = tag.data
-            }
-        end
-    end
-    return nil
-end
-
 --- Normalize any map name or snake case name to a name with sentence case
 ---@param name string
 function core.toSentenceCase(name)
@@ -298,31 +272,6 @@ function core.eulerToRotation(yaw, pitch, roll)
     return rollVector, yawVector, matrix
 end
 
---- Find the path, index and id of a list of tags given partial name and tag type
----@param partialName string
----@param searchTagType string
----@return tag[] tag
-function core.findTagsList(partialName, searchTagType)
-    local tagsList
-    for tagIndex = 0, blam.tagDataHeader.count - 1 do
-        local tag = blam.getTag(tagIndex)
-        if (tag and tag.path:find(partialName) and tag.class == searchTagType) then
-            if (not tagsList) then
-                tagsList = {}
-            end
-            tagsList[#tagsList + 1] = {
-                id = tag.id,
-                path = tag.path,
-                index = tag.index,
-                class = tag.class,
-                indexed = tag.indexed,
-                data = tag.data
-            }
-        end
-    end
-    return tagsList
-end
-
 ---Parse and strip any hsc command into individual parts
 ---@param hscCommand string
 ---@return string[]
@@ -344,7 +293,7 @@ end
 
 --- Process HSC code from the Harmony hook
 ---@param hscCommand string
----@return boolean
+---@return string?
 function core.adaptHSC(hscCommand)
     -- Check if the map is trying to get a player on a vehicle
     if (starts(hscCommand, "sync_unit_enter_vehicle") and hscCommand:find("player")) then
@@ -379,6 +328,7 @@ function core.adaptHSC(hscCommand)
             local vehicle = blam.object(get_object(vehicleObjectId))
             if (vehicle and not blam.isNull(vehicle.nameIndex)) then
                 local scenario = blam.scenario(0)
+                assert(scenario, "Failed to load scenario tag")
                 local objectScenarioName = scenario.objectNames[vehicle.nameIndex + 1]
                 if (objectName == objectScenarioName) then
                     return
@@ -450,8 +400,8 @@ end
 function core.dispatchAISpawn(upcomingAiSpawn)
     for objectId, tagId in pairs(upcomingAiSpawn) do
         local ai = blam.biped(get_object(objectId))
-        if (ai and not ai.isHealthEmpty) then
-            if (blam.isNull(ai.nameIndex)) then
+        if ai and not ai.isApparentlyDead then
+            if blam.isNull(ai.nameIndex) then
                 Broadcast(core.positionPacket(objectId, ai))
                 upcomingAiSpawn[objectId] = nil
             else
