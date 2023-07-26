@@ -126,29 +126,32 @@ function SyncDeadAI()
                 -- Biped is not a cinematic object
                 if isNull(ai.nameIndex) then
                     -- Biped is dead, send dead packet, then remove it from the sync list
-                    if ai.isApparentlyDead and ai.health <= 0 then
+                    --if ai.isApparentlyDead and ai.health <= 0 then
+                    if not core.getSyncedIndexByObjectId(serverObjectId) then
                         -- local killPacket = core.deletePacket(serverObjectId)
-                        -- FIXME We will need a better implementation cause synced index
+                        -- FIXME We might need a better implementation cause synced index
                         -- is not alive anymore due to us getting it after biped death
                         -- we should have a hook to the synced index unregistering or keep a
                         -- cache or map of synced indexes to server object ids
                         local killPacket = core.deletePacket(
                                                core.getSyncedIndexByObjectId(serverObjectId))
                         -- Broadcast(killPacket)
-                        if not aiCollection[serverObjectId] then
-                            local mostRecentDamagerPlayer = ai.mostRecentDamagerPlayer
-                            if not isNull(mostRecentDamagerPlayer) then
-                                local playerIndex = core.getIndexById(mostRecentDamagerPlayer) + 1
-                                local player = blam.player(get_player(playerIndex))
-                                if (player) then
-                                    player.kills = player.kills + 1
-                                end
-                            end
-                            -- Set that this biped already has a timer asigned for collection
-                            aiCollection[serverObjectId] = true
-                            -- Set collector, it helps to ensure packet is sent more than once
-                            timer(150, "CleanBipeds", serverObjectId)
-                        end
+                        --if not aiCollection[serverObjectId] then
+                        --local mostRecentDamagerPlayer = ai.mostRecentDamagerPlayer
+                        --if not isNull(mostRecentDamagerPlayer) then
+                        --    local playerIndex = core.getIndexById(mostRecentDamagerPlayer) + 1
+                        --    local player = blam.player(get_player(playerIndex))
+                        --    if (player) then
+                        --        player.kills = player.kills + 1
+                        --    end
+                        --end
+                        --    -- Set that this biped already has a timer asigned for collection
+                        --    aiCollection[serverObjectId] = true
+                        --    -- Set collector, it helps to ensure packet is sent more than once
+                        --    timer(150, "CleanBipeds", serverObjectId)
+                        --end
+                        -- This biped does not exist anymore on the server, erase it from the list
+                        aiList[serverObjectId] = nil
                     end
                 end
             else
