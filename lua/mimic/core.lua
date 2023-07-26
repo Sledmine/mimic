@@ -1,14 +1,15 @@
 local glue = require "glue"
+local luna = require "luna"
 local inspect = require "inspect"
-local split = glue.string.split
+local split = luna.string.split
 local tohex = glue.string.tohex
 local fromhex = glue.string.fromhex
 local append = glue.append
 local shift = glue.shift
-local map = glue.map
 local trim = glue.string.trim
 local escape = glue.string.esc
-local starts = glue.string.starts
+local starts = luna.startswith
+local memoize = require "memoize"
 
 local blam = require "blam"
 local isNull = blam.isNull
@@ -42,16 +43,19 @@ function core.debug(message, ...)
     end
 end
 
-function core.encode(format, value)
+local function encodeU(format, value)
     -- TODO We might want to memoize this to improve performance
     return tohex(strpack(format, value))
 end
-local encode = core.encode
+local encode = memoize(encodeU)
+core.encode = encode
 
-function core.decode(format, value)
+local function decodeU(format, value)
     -- TODO We might want to memoize this to improve performance
     return strunpack(format, fromhex(value))
 end
+local decode = memoize(decodeU)
+core.decode = decode
 
 --- Get index value from an id value type
 ---@param id number
@@ -287,8 +291,9 @@ function core.parseHSC(hscCommand)
     local commandData = split(parsedCommand, " ")
     -- Get just parameters from the entire command, remove space escaping
     ---@type string[]
-    local params = map(commandData, function(parameter)
-        return parameter:gsub("%%20", " ")
+    local params = table.map(commandData, function(parameter)
+        -- return parameter:gsub("%%20", " ")
+        return parameter:replace("%20", " ")
     end)
     return params
 end

@@ -399,7 +399,7 @@ function OnTick()
             -- "Async" mode functionality, experimental!!
             for i = 1, #queuePackets do
                 local pendingPacket = queuePackets[i]
-                if (pendingPacket) then
+                if pendingPacket then
                     ProcessPacket(pendingPacket[1], pendingPacket[2], pendingPacket[3])
                     table.remove(queuePackets, i)
                 end

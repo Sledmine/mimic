@@ -9,6 +9,7 @@
         "glue",
         "luna",
         "inspect",
+        "memoize",
         "blam",
         "mimic.core",
         "mimic.coop",

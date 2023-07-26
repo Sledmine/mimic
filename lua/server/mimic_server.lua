@@ -127,13 +127,14 @@ function SyncDeadAI()
                 if isNull(ai.nameIndex) then
                     -- Biped is dead, send dead packet, then remove it from the sync list
                     if ai.isApparentlyDead and ai.health <= 0 then
-                        --local killPacket = core.deletePacket(serverObjectId)
+                        -- local killPacket = core.deletePacket(serverObjectId)
                         -- FIXME We will need a better implementation cause synced index
                         -- is not alive anymore due to us getting it after biped death
                         -- we should have a hook to the synced index unregistering or keep a
                         -- cache or map of synced indexes to server object ids
-                        local killPacket = core.deletePacket(core.getSyncedIndexByObjectId(serverObjectId))
-                        --Broadcast(killPacket)
+                        local killPacket = core.deletePacket(
+                                               core.getSyncedIndexByObjectId(serverObjectId))
+                        -- Broadcast(killPacket)
                         if not aiCollection[serverObjectId] then
                             local mostRecentDamagerPlayer = ai.mostRecentDamagerPlayer
                             if not isNull(mostRecentDamagerPlayer) then
@@ -170,7 +171,7 @@ local function updateAI(ai, serverObjectId, syncedIndex)
                                            serverObjectId, constants.syncBoundingRadius, 0,
                                            constants.syncDistance)) then
                     -- FIXME Some times packet is nil, debug this
-                    --local updatePacket = core.updatePacket(serverObjectId, ai)
+                    -- local updatePacket = core.updatePacket(serverObjectId, ai)
                     local updatePacket = core.updatePacket(syncedIndex, ai)
                     if syncedIndex and updatePacket then
                         Send(playerIndex, updatePacket)
@@ -181,7 +182,7 @@ local function updateAI(ai, serverObjectId, syncedIndex)
                 if vehicle and core.objectIsNearTo(vehicle, ai, constants.syncDistance) then
                     -- FIXME Some times packet is nil, debug this
                     -- I think it is fixed now?? see return comment in the inner function
-                    --local updatePacket = core.updatePacket(serverObjectId, ai)
+                    -- local updatePacket = core.updatePacket(serverObjectId, ai)
                     local updatePacket = core.updatePacket(serverObjectId, ai)
                     if updatePacket then
                         Send(playerIndex, updatePacket)
@@ -276,7 +277,7 @@ end
 function OnPlayerJoin(playerIndex)
     -- Set players on the same team for coop purposes
     execute_script("st " .. playerIndex .. " red")
-    --timer(30, "SyncState", playerIndex)
+    -- timer(30, "SyncState", playerIndex)
     timer(80, "SyncState", playerIndex)
 
     console_out("Starting sync for player " .. playerIndex)
@@ -329,7 +330,7 @@ function ShowCurrentSyncedObjects()
 end
 
 function OnGameStart()
-    --timer(1000, "ShowCurrentSyncedObjects")
+    -- timer(1000, "ShowCurrentSyncedObjects")
     console_out("-> Mimic version: " .. version)
     CurrentScenario = blam.scenario(0)
     -- Register available bipeds on the map
@@ -459,7 +460,7 @@ function OnTick()
     -- We probably do not need this anymore cause bipeds already spawn on client side and due to
     -- synced indexes we can just send the update packet total clients, by now we don't have to
     -- force spawn bipeds on the client side
-    --upcomingAiSpawn = core.dispatchAISpawn(upcomingAiSpawn)
+    -- upcomingAiSpawn = core.dispatchAISpawn(upcomingAiSpawn)
 end
 
 function OnScriptLoad()

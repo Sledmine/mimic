@@ -1,5 +1,5 @@
 return {
-    syncDistance = 15,
+    syncDistance = 30,
     syncEveryMillisecs = 80,
     syncBoundingRadius = 0.5,
     collectBipedsEveryMillisecs = 150,
