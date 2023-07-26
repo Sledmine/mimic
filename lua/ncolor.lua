@@ -2,7 +2,7 @@ local convertColor = {}
 
 --- Convert to decimal rgb color from hex string color
 ---@param hex string
----@param alpha number
+---@param alpha? number
 function convertColor.hexToDec(hex, alpha)
     local redColor, greenColor, blueColor = hex:gsub("#", ""):match("(..)(..)(..)")
     redColor, greenColor, blueColor = tonumber(redColor, 16) / 255,

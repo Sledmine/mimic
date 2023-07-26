@@ -2626,7 +2626,7 @@ local syncedObjectsTable = {
 --- Return an element from the synced objects table
 ---@param index number
 ---@return number?
-function blam.getSyncedObjectId(index)
+function blam.getObjectIdBySincedIndex(index)
     if index then
         local tableAddress
         if server_type == "sapp" then

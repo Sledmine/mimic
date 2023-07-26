@@ -8,21 +8,22 @@ clua_version = 2.056
 local blam = require "blam"
 objectClasses = blam.objectClasses
 tagClasses = blam.tagClasses
+local isNull = blam.isNull
 local harmony = require "mods.harmony"
 local core = require "mimic.core"
 local coop = require "mimic.coop"
 local hsc = require "mimic.hsc"
 local scriptVersion = require "mimic.version"
-local glue = require "glue"
-local split = glue.string.split
-local append = glue.append
-local starts = glue.string.starts
+local luna = require "luna"
+local split = luna.string.split
+local append = table.insert
+local starts = luna.string.startswith
 local color = require "ncolor"
 local concat = table.concat
 local constants = require "mimic.constants"
 
 -- Script settings variables (do not modify them manually)
-DebugMode = false
+DebugMode = true
 DebugLevel = 1
 local lastMapName
 local enableSync = false
@@ -51,7 +52,7 @@ local frozenBipeds = {}
 local lastPlayerTagId
 
 function dprint(message, ...)
-    if (DebugMode) then
+    if DebugMode then
         local color = {1, 1, 1}
         if (...) then
             local debugMessage = string.format(message, ...)
@@ -89,12 +90,12 @@ end
 function CleanBipeds(serverId)
     -- execute_script("ai_erase_all")
     local data = aiList[serverId]
-    if (data) then
+    if data then
         dprint("Cleaning biped %s", serverId)
         local objectId = data.objectId
-        if (objectId) then
+        if objectId then
             frozenBipeds[objectId] = nil
-            if (get_object(objectId)) then
+            if get_object(objectId) then
                 delete_object(objectId)
             end
         end
@@ -119,29 +120,17 @@ local function getAIDataByObjectId(objectId)
     return nil
 end
 
-local function findBipedCandidate(expectedCoordinates, tagId)
-    for objectId, serverBiped in pairs(frozenBipeds) do
-        local object = blam.biped(get_object(objectId))
-        if (object and
-            core.objectIsNearTo(serverBiped, expectedCoordinates, constants.bipedCandidateThreshold) and
-            serverBiped.tagId == tagId and not getAIDataByObjectId(objectId)) then
-            return objectId
-        end
-    end
-    return nil
-end
-
 ---@class aiData
 ---@field tagId number
 ---@field lastUpdateAt number
----@field objectId number
----@field objectIndex number
+---@field objectId? number
+---@field objectIndex? number
 ---@field isLocal boolean
----@field expectedCoordinates vector3D
+-- @field expectedCoordinates vector3D
 
 function ProcessPacket(message, packetType, packet)
     -- Enable synchronization only when the server sent a mimic packet
-    if (not enableSync) then
+    if not enableSync then
         enableSync = true
     end
     local currentTime = os.time()
@@ -149,26 +138,32 @@ function ProcessPacket(message, packetType, packet)
         packetCount = packetCount + 1
     end
     -- dprint("Packet %s size: %s", packetType, #message)
-    if (packetType == "@p") then
+    if packetType == "@p" then
+        -- Erase local AI bipeds
         execute_script("ai_erase_all")
-        local serverId = packet[2]
+
+        local syncedIndex = tonumber(packet[2])
+        assert(syncedIndex, "Error, synced index is not valid")
+
         local tagId = tonumber(packet[3])
-        local x = core.decode("f", packet[4])
-        local y = core.decode("f", packet[5])
-        local z = core.decode("f", packet[6])
-        if (not aiList[serverId] or (aiList[serverId] and not aiList[serverId].objectId)) then
-            local tag = blam.getTag(tagId)
-            dprint("Registering AI %s:%s", serverId, tag.path)
-            -- dprint("Frozen bipeds count: %s", #glue.keys(frozenBipeds))
-            aiList[serverId] = {
-                tagId = tagId,
-                lastUpdateAt = currentTime,
-                expectedCoordinates = {x = x, y = y, z = z}
-            }
+        assert(tagId, "Error, tag id is not valid")
+
+        local objectId = blam.getObjectIdBySincedIndex(syncedIndex)
+        if not objectId then
+            error("Error, object id not found for synced index: " .. syncedIndex)
         end
-    elseif (packetType == "@u") then
+        aiList[syncedIndex] = {
+            tagId = tagId,
+            lastUpdateAt = currentTime,
+            isLocal = false,
+            objectId = objectId
+        }
+    elseif packetType == "@u" then
         execute_script("ai_erase_all")
-        local serverId = packet[2]
+
+        local syncedIndex = tonumber(packet[2])
+        assert(syncedIndex, "Error, synced index is not valid")
+
         local x = core.decode("f", packet[3])
         local y = core.decode("f", packet[4])
         local z = core.decode("f", packet[5])
@@ -180,101 +175,91 @@ function ProcessPacket(message, packetType, packet)
         local r, g, b = color.hexToDec(hexColor)
         local invisible = tonumber(packet[11])
 
-        local aiData = aiList[serverId]
-        if (aiData and aiData.tagId) then
+        -- Not so sure about this
+        local aiData = aiList[syncedIndex]
+        if not aiData then
+            local objectId = blam.getObjectIdBySincedIndex(syncedIndex)
+            if objectId then
+                aiList[syncedIndex] = {
+                    tagId = blam.object(get_object(objectId)).tagId,
+                    lastUpdateAt = currentTime,
+                    isLocal = false,
+                    objectId = objectId
+                }
+                aiData = aiList[syncedIndex]
+            end
+        end
+
+        if aiData and aiData.tagId then
             local tagId = aiData.tagId
             local objectId = aiData.objectId
-            if (objectId and not blam.isNull(get_object(objectId))) then
+            if objectId and not isNull(get_object(objectId)) then
                 core.updateBiped(objectId, x, y, z, vX, vY, animation, animationFrame, r, g, b,
                                  invisible)
                 -- local tag = blam.getTag(tagId)
-                -- dprint("Updating %s -> %s, %s: %s %s %s", serverId, objectId, tag.path, x , y, z)
+                -- assert(tag, "Error, tag not found")
+                -- dprint("Updating %s -> %s, %s: %s %s %s", syncedIndex, objectId, tag.path, x , y, z)
             else
-                dprint("Candidate search for %s...", serverId)
-                local candidateId = findBipedCandidate(aiData.expectedCoordinates, tagId)
-                if (candidateId) then
-                    local aiBiped = blam.biped(get_object(candidateId))
-                    local tag = blam.getTag(aiBiped.tagId)
-                    dprint("->> Success, found %s: %s", tag.path, candidateId)
-                    aiList[serverId] = {
-                        tagId = tagId,
-                        lastUpdateAt = currentTime,
-                        objectId = candidateId,
-                        isLocal = false
-                    }
-                    core.virtualizeBiped(aiBiped)
-                end
-                local newObjectId = aiList[serverId].objectId
-                if (not newObjectId or (newObjectId and not get_object(newObjectId))) then
-                    local tag = blam.getTag(aiData.tagId)
-                    dprint("Warning, biped %s, %s update mismatch, creating local biped...",
-                           serverId, tag.path)
-                    local localObjectId = core.syncBiped(tagId, x, y, z, vX, vY, animation,
-                                                         animationFrame, r, g, b, invisible)
-                    if localObjectId then
-                        aiList[serverId].objectId = localObjectId
-                        aiList[serverId].isLocal = true
-                        dprint("Success, local biped created.")
-                    else
-                        dprint("Error, local biped can not be created.")
-                    end
-                end
+                error("Error, update packet received for non existing biped: " .. syncedIndex)
             end
             aiData.lastUpdateAt = currentTime
         end
-    elseif (packetType == "@k") then
-        local serverId = packet[2]
+    elseif packetType == "@k" then
+        local syncedIndex = tonumber(packet[2])
+        if syncedIndex then
+            local data = aiList[syncedIndex]
+            -- TODO Check if an action needs to be taken if no biped exists at dying
+            if data then
+                local objectId = data.objectId
+                if objectId then
+                    local biped = blam.biped(get_object(objectId))
+                    if biped then
+                        if data.isLocal then
+                            core.debug("Killing biped %s", syncedIndex)
+                            biped.health = 0
+                            biped.shield = 0
+                            biped.animationFrame = 0
 
-        local data = aiList[serverId]
-        -- TODO Check if an action needs to be taken if no biped exists at dying
-        if (data) then
-            local objectId = data.objectId
-            if (objectId) then
-                local biped = blam.biped(get_object(objectId))
-                if (biped) then
-                    if data.isLocal then
-                        core.debug("Killing biped %s", serverId)
-                        biped.health = 0
-                        biped.shield = 0
-                        biped.animationFrame = 0
+                            biped.isNotDamageable = false
+                            biped.ignoreGravity = false
+                            biped.invisible = false
 
-                        biped.isNotDamageable = false
-                        biped.ignoreGravity = false
-                        biped.invisible = false
-
-                        -- Force kill prematurely
-                        biped.isHealthEmpty = true
-                    else
-                        core.revertBipedVirtualization(biped)
-                        -- local tag = blam.getTag(biped.tagId)
-                        -- if (tag.path:find("flood")) then
-                        --    biped.isHealthEmpty = true
-                        --    core.debug(
-                        --        "kill packet from %s -> %s, server sided biped will be killed as it as a Flood biped",
-                        --        serverId, objectId)
-                        -- else
-                        if biped.isHealthEmpty then
-                            core.debug("Ignoring kill packet from %s -> %s, biped is server sided",
-                                       serverId, objectId)
+                            -- Force kill prematurely
+                            biped.isHealthEmpty = true
                         else
-                            biped.isApparentlyDead = true
-                        end
+                            core.revertBipedVirtualization(biped)
+                            -- local tag = blam.getTag(biped.tagId)
+                            -- if (tag.path:find("flood")) then
+                            --    biped.isHealthEmpty = true
+                            --    core.debug(
+                            --        "kill packet from %s -> %s, server sided biped will be killed as it as a Flood biped",
+                            --        serverId, objectId)
+                            -- else
+                            if biped.isHealthEmpty then
+                                core.debug(
+                                    "Ignoring kill packet from %s -> %s, biped is server sided",
+                                    syncedIndex, objectId)
+                            else
+                                biped.isApparentlyDead = true
+                            end
 
-                        -- end
+                            -- end
+                        end
                     end
                 end
-            end
-            -- Cleanup
-            if (bipedCleaner) then
-                if (not aiCollection[serverId]) then
-                    aiCollection[serverId] = set_timer(constants.cleanBipedsEveryMillisecs,
-                                                       "CleanBipeds", serverId)
+                -- Cleanup
+                if bipedCleaner then
+                    if (not aiCollection[syncedIndex]) then
+                        aiCollection[syncedIndex] =
+                            set_timer(constants.cleanBipedsEveryMillisecs, "CleanBipeds",
+                                      syncedIndex)
+                    end
+                else
+                    CleanBipeds(syncedIndex)
                 end
-            else
-                CleanBipeds(serverId)
             end
         end
-    elseif (packetType == "@i") then
+    elseif packetType == "@i" then
         local votesLeft = packet[2]
         local difficulty = packet[3]
         coop.updateCoopInfo(votesLeft, difficulty)
@@ -301,7 +286,7 @@ end
 
 local function onGameStart()
     gameStarted = true
-    if (map:find("coop_evolved")) then
+    if map:includes("coop_evolved") then
         enableSync = true
         availableBipeds = coop.loadCoopMenu()
 
@@ -309,14 +294,14 @@ local function onGameStart()
 end
 
 function OnTick()
-    if (not gameStarted) then
+    if not gameStarted then
         onGameStart()
     end
-    if (enableSync and gameStarted) then
+    if enableSync and gameStarted then
         -- Constantly erase locally created AI bipeds
         execute_script("ai_erase_all")
         -- Check if map is a coop evolved map
-        if (map:find("coop_evolved")) then
+        if map:find("coop_evolved") then
             local playerBiped = blam.biped(get_dynamic_player())
             if (playerBiped) then
                 if (lastPlayerTagId ~= playerBiped.tagId) then
@@ -326,7 +311,7 @@ function OnTick()
             end
         end
     end
-    if (lastMapName ~= map) then
+    if lastMapName ~= map then
         lastMapName = map
         if (lastMapName == "ui") then
             disablePlayerCollision = false
@@ -335,39 +320,42 @@ function OnTick()
         end
     end
     -- Start removing the server created bipeds only when the server aks for it
-    if (blam.isGameDedicated()) then
+    if blam.isGameDedicated() then
         if (disablePlayerCollision) then
             local player = blam.biped(get_dynamic_player())
             if (player) then
                 blam.bipedTag(player.tagId).disableCollision = true
             end
         end
-        if (enableSync) then
+        if enableSync then
             -- Filtering for objects that are being synced from the server
             for _, objectIndex in pairs(blam.getObjects()) do
                 local _, objectId = blam.getObject(objectIndex)
+                assert(objectId, "Error, object id is not valid")
                 local object = blam.object(get_object(objectId))
                 -- Only process objects that are bipeds
-                if (object and object.type == objectClasses.biped) then
+                if object and object.class == objectClasses.biped then
                     local object = blam.biped(get_object(objectId))
+                    assert(object, "Error, object is not valid")
                     --[[ Remove bipeds matching these conditions:
                         Is alive (has more than 0 health)
                         Does not belong to a player (it does not have player id)
                         Does not have a name assigned on the scenario (is not a cinematic object)
                     ]]
-                    if (blam.isNull(object.playerId) and blam.isNull(object.nameIndex)) then
-                        local isBipedDead = object.isHealthEmpty
+                    if isNull(object.playerId) and isNull(object.nameIndex) then
+                        local isBipedDead = object.isApparentlyDead
                         local tag = blam.getTag(object.tagId)
-                        if (tag.path:find("flood") or tag.path:find("monitor") or
-                            tag.path:find("sentinel")) then
+                        assert(tag, "Error, tag is not valid")
+                        if tag.path:includes("flood") or tag.path:includes("monitor") or
+                            tag.path:includes("sentinel") then
                             isBipedDead = false
                         end
-                        if (not isBipedDead) then
+                        if not isBipedDead then
                             -- Check if this object is already being synced
                             local aiData = getAIDataByObjectId(objectId)
-                            if (not aiData) then
+                            if not aiData then
                                 -- Freeze biped for assignation purposes later
-                                if (not frozenBipeds[objectId]) then
+                                if not frozenBipeds[objectId] then
                                     frozenBipeds[objectId] = {
                                         tagId = object.tagId,
                                         x = object.x,
@@ -375,16 +363,17 @@ function OnTick()
                                         z = object.z
                                     }
                                 end
-                                core.hideBiped(object)
+                                -- core.hideBiped(object)
                             else
-                                if (aiData.isLocal) then
+                                if aiData.isLocal then
                                     local currentTime = os.time()
                                     local timeSinceLastUpdate = currentTime - aiData.lastUpdateAt
-                                    if (aiData.objectId and timeSinceLastUpdate >
-                                        constants.considerOrphanBipedAfterSeconds) then
+                                    if aiData.objectId and timeSinceLastUpdate >
+                                        constants.considerOrphanBipedAfterSeconds then
                                         local biped = blam.biped(get_object(aiData.objectId))
-                                        if (biped) then
+                                        if biped then
                                             local tag = blam.getTag(biped.tagId)
+                                            assert(tag, "Error, tag is not valid")
                                             dprint("Erasing orphan biped %s, last update at %s",
                                                    tag.path, aiData.lastUpdateAt)
                                             delete_object(aiData.objectId)
@@ -418,8 +407,8 @@ function OnTick()
         end
     end
     local playerBiped = blam.biped(get_dynamic_player())
-    if (DebugMode) then
-        if (get_player()) then
+    if DebugMode then
+        if get_player() then
             local currentTime = os.time()
             if (currentTime - timeSinceLastPacket) >= 1 then
                 timeSinceLastPacket = currentTime
@@ -445,7 +434,7 @@ function OnTick()
 end
 
 local function clientSideProjectiles(enable)
-    if (enable) then
+    if enable then
         dprint("ENABLING client side projectiles...")
         execute_script("allow_client_side_weapon_projectiles 1")
         return true
@@ -455,19 +444,22 @@ local function clientSideProjectiles(enable)
     return false
 end
 
+--- OnPacket
+---@param message string
+---@return boolean?
 function OnPacket(message)
-    local packet = (glue.string.split(message, ","))
+    local packet = message:split(",")
     -- This is a packet sent from the server script for
-    if (packet and packet[1]:find("@")) then
+    if packet and packet[1]:find("@") then
         local packetType = packet[1]
-        if (asyncMode) then
-            glue.append(queuePackets, {message, packetType, packet})
+        if asyncMode then
+            table.insert(queuePackets, {message, packetType, packet})
         else
             ProcessPacket(message, packetType, packet)
         end
         return false
-    elseif (message:find("sync_")) then
-        local data = glue.string.split(message, "sync_")
+    elseif message:find("sync_") then
+        local data = message:split "sync_"
         local command = data[2]:gsub("'", "\"")
         dprint("Sync command: %s", command)
         if DebugMode then
@@ -475,13 +467,13 @@ function OnPacket(message)
         end
         execute_script(command)
         if (command:find("camera_set")) then
-            local params = glue.string.split(command, " ")
+            local params = command:split " "
             local cutsceneCameraPoint = params[2]
             dprint("Unlocking cinematic camera: " .. cutsceneCameraPoint)
             execute_script("object_pvs_set_camera " .. cutsceneCameraPoint)
         end
         return false
-    elseif (message == "disable_biped_collision") then
+    elseif message == "disable_biped_collision" then
         disablePlayerCollision = true
         return false
     elseif (message == "enable_biped_collision") then
@@ -504,7 +496,7 @@ end
 ---@return boolean
 function OnCommand(command)
     if starts(command, "mdebug") or starts(command, "mimic_debug") then
-        local params = glue.string.split(command, " ")
+        local params = command:split " "
         if (#params > 1 and params[2]) then
             DebugLevel = tonumber(params[2])
         end
@@ -539,24 +531,24 @@ function OnCommand(command)
 end
 
 function OnMenuAccept(widgetTagId)
-    if (map:find("coop_evolved")) then
+    if map:find("coop_evolved") then
         local widgetTag = blam.getTag(widgetTagId)
-        if (widgetTag) then
-            if (widgetTag.path:find("ready_button", 1, true)) then
+        if widgetTag then
+            if widgetTag.path:includes("ready_button") then
                 local rconCommand = "rcon coup @r,1"
                 dprint(rconCommand)
                 execute_script(rconCommand)
-            elseif (widgetTag.path:find("biped_buttons", 1, true)) then
+            elseif widgetTag.path:includes("biped_buttons") then
                 local tagSplit = split(widgetTag.path, "\\")
                 local buttonTagName = tagSplit[#tagSplit]
                 local desiredBipedIndex = tonumber(split(buttonTagName, "biped_")[2])
-                if (blam.isGameDedicated()) then
+                if blam.isGameDedicated() then
                     local rconCommand = "rcon coup @b," .. availableBipeds[desiredBipedIndex].id
                     dprint(rconCommand)
                     execute_script(rconCommand)
                 else
                     local globals = blam.globalsTag()
-                    if (globals) then
+                    if globals then
                         local player = blam.player(get_player())
                         local mpInfo = globals.multiplayerInformation
                         mpInfo[1].unit = coop.loadCoopMenu(false)[desiredBipedIndex].id
@@ -572,7 +564,7 @@ function OnMenuAccept(widgetTagId)
 end
 
 function OnUnload()
-    if (ticks() > 0) then
+    if ticks() > 0 then
         disablePlayerCollision = false
         clientSideProjectiles(true)
     end
@@ -582,8 +574,8 @@ function OnPreFrame()
     if (DebugMode and (blam.isGameDedicated() or blam.isGameHost())) then
         draw_text(nearestAIDetails, bounds.left, bounds.top, bounds.right, bounds.bottom, font,
                   align, table.unpack(textColor))
-        draw_text(("AI: %s / Packets per second: %s"):format(#glue.keys(aiList) -
-                                                                 #glue.keys(aiCollection),
+        draw_text(("AI: %s / Packets per second: %s"):format(#table.keys(aiList) -
+                                                                 #table.keys(aiCollection),
                                                              packetsPerSecond), bounds.left,
                   bounds.top + 30, bounds.right, bounds.bottom, font, align, table.unpack(textColor))
     end

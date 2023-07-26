@@ -96,7 +96,8 @@ function SyncAIData(playerIndex)
     for objectId in pairs(aiList) do
         local ai = blam.biped(get_object(objectId))
         if ai then
-            Send(playerIndex, core.positionPacket(objectId, ai))
+            -- TODO Delay this to avoid lag at joining the server
+            Send(playerIndex, core.positionPacket(core.getSyncedIndexByObjectId(objectId), ai))
         end
     end
     for objectId, group in pairs(DeviceMachinesList) do
@@ -118,19 +119,24 @@ end
 
 function SyncDeadAI()
     local playersCount = tonumber(get_var(0, "$pn"))
-    if (playersCount > 0) then
+    if playersCount > 0 then
         for serverObjectId, tagId in pairs(aiList) do
             local ai = blam.biped(get_object(serverObjectId))
-            if (ai) then
+            if ai then
                 -- Biped is not a cinematic object
-                if (isNull(ai.nameIndex)) then
+                if isNull(ai.nameIndex) then
                     -- Biped is dead, send dead packet, then remove it from the sync list
-                    if (ai.isApparentlyDead and ai.health <= 0) then
-                        local killPacket = core.deletePacket(serverObjectId)
-                        Broadcast(killPacket)
-                        if (not aiCollection[serverObjectId]) then
+                    if ai.isApparentlyDead and ai.health <= 0 then
+                        --local killPacket = core.deletePacket(serverObjectId)
+                        -- FIXME We will need a better implementation cause synced index
+                        -- is not alive anymore due to us getting it after biped death
+                        -- we should have a hook to the synced index unregistering or keep a
+                        -- cache or map of synced indexes to server object ids
+                        local killPacket = core.deletePacket(core.getSyncedIndexByObjectId(serverObjectId))
+                        --Broadcast(killPacket)
+                        if not aiCollection[serverObjectId] then
                             local mostRecentDamagerPlayer = ai.mostRecentDamagerPlayer
-                            if (not isNull(mostRecentDamagerPlayer)) then
+                            if not isNull(mostRecentDamagerPlayer) then
                                 local playerIndex = core.getIndexById(mostRecentDamagerPlayer) + 1
                                 local player = blam.player(get_player(playerIndex))
                                 if (player) then
@@ -154,7 +160,7 @@ function SyncDeadAI()
     end
 end
 
-local function updateAI(ai, serverObjectId)
+local function updateAI(ai, serverObjectId, syncedIndex)
     for playerIndex = 1, 16 do
         local player = blam.biped(get_dynamic_player(playerIndex))
         if player then
@@ -164,8 +170,9 @@ local function updateAI(ai, serverObjectId)
                                            serverObjectId, constants.syncBoundingRadius, 0,
                                            constants.syncDistance)) then
                     -- FIXME Some times packet is nil, debug this
-                    local updatePacket = core.updatePacket(serverObjectId, ai)
-                    if (updatePacket) then
+                    --local updatePacket = core.updatePacket(serverObjectId, ai)
+                    local updatePacket = core.updatePacket(syncedIndex, ai)
+                    if syncedIndex and updatePacket then
                         Send(playerIndex, updatePacket)
                     end
                 end
@@ -174,6 +181,7 @@ local function updateAI(ai, serverObjectId)
                 if vehicle and core.objectIsNearTo(vehicle, ai, constants.syncDistance) then
                     -- FIXME Some times packet is nil, debug this
                     -- I think it is fixed now?? see return comment in the inner function
+                    --local updatePacket = core.updatePacket(serverObjectId, ai)
                     local updatePacket = core.updatePacket(serverObjectId, ai)
                     if updatePacket then
                         Send(playerIndex, updatePacket)
@@ -195,13 +203,14 @@ function SyncUpdate()
         aiCount = newAiCount
     end
     local playersCount = tonumber(get_var(0, "$pn"))
-    if (playersCount > 0) then
+    if playersCount > 0 then
         for serverObjectId, tagId in pairs(aiList) do
             local ai = blam.biped(get_object(serverObjectId))
-            if (ai) then
+            if ai then
+                local syncedIndex = core.getSyncedIndexByObjectId(serverObjectId)
                 -- Only sync ai inside the same bsp as the players
-                if (not ai.isOutSideMap) then
-                    updateAI(ai, serverObjectId)
+                if not ai.isOutSideMap and syncedIndex then
+                    updateAI(ai, serverObjectId, syncedIndex)
                 end
             end
         end
@@ -267,8 +276,11 @@ end
 function OnPlayerJoin(playerIndex)
     -- Set players on the same team for coop purposes
     execute_script("st " .. playerIndex .. " red")
-    timer(30, "SyncState", playerIndex)
-    timer(3000, "SyncAIData", playerIndex)
+    --timer(30, "SyncState", playerIndex)
+    timer(80, "SyncState", playerIndex)
+
+    console_out("Starting sync for player " .. playerIndex)
+    timer(300, "SyncAIData", playerIndex)
 end
 
 function OnPlayerLeave(playerIndex)
@@ -285,30 +297,7 @@ function OnPlayerLeave(playerIndex)
 end
 
 function OnPlayerDead(deadPlayerIndex)
-    local currentGameType = get_var(0, "$mode")
-    if (currentGameType:find("survival")) then
-        IncreaseAIHealth()
-        -- local playerDeadTimes = 0
-        -- local playersCount = tonumber(get_var(0, "$pn"))
-        -- local player = blam.player(get_player(deadPlayerIndex))
-        -- if (playerDeadTimes == playersCount) then
-        --    say_all("Game over, AI wins...")
-        --    local currentMapName = get_var(0, "$map")
-        --    execute_script("sv_map " .. currentMapName .. " " .. currentGameType)
-        -- end
-    end
     coop.findNewSpawn(deadPlayerIndex)
-end
-
-function IncreaseAIHealth()
-    for serverObjectId, tagId in pairs(aiList) do
-        local biped = blam.biped(get_object(serverObjectId))
-        if biped and not biped.isApparentlyDead then
-            biped.health = biped.health + 0.5
-        end
-    end
-    say_all("Increasing AI health...")
-    return true
 end
 
 function ResetState()
@@ -324,15 +313,15 @@ function OnGameEnd()
     ResetState()
 end
 
-function kk()
+function ShowCurrentSyncedObjects()
     console_out("---------------------- SYNCED OBJECTS ----------------------")
     for i = 0, 509 do
-        local objectId = blam.getSyncedObjectId(i)
+        local objectId = blam.getObjectIdBySincedIndex(i)
         if objectId and not blam.isNull(objectId) then
             local objectAddress = get_object(objectId)
             local object = blam.object(objectAddress)
             assert(object, "Object not found")
-            local format = "[%s] - %s ID: %s"
+            local format = "[%s] - %s - Object ID: %s"
             console_out(format:format(i, blam.getTag(object.tagId).path, objectId))
         end
     end
@@ -340,7 +329,7 @@ function kk()
 end
 
 function OnGameStart()
-    timer(1000, "kk")
+    --timer(1000, "ShowCurrentSyncedObjects")
     console_out("-> Mimic version: " .. version)
     CurrentScenario = blam.scenario(0)
     -- Register available bipeds on the map
@@ -457,8 +446,8 @@ function OnTick()
                 end
             end
             blam.bipedTag(playerBiped.tagId).disableCollision = true
-            if (playerBiped.isOutSideMap) then
-                if (not IsGameOnCinematic and player) then
+            if playerBiped.isOutSideMap then
+                if not IsGameOnCinematic and player then
                     -- TODO Add a way to respawn vehicle by force
                     if (isNull(playerBiped.vehicleObjectId)) then
                         delete_object(player.objectId)
@@ -467,7 +456,10 @@ function OnTick()
             end
         end
     end
-    upcomingAiSpawn = core.dispatchAISpawn(upcomingAiSpawn)
+    -- We probably do not need this anymore cause bipeds already spawn on client side and due to
+    -- synced indexes we can just send the update packet total clients, by now we don't have to
+    -- force spawn bipeds on the client side
+    --upcomingAiSpawn = core.dispatchAISpawn(upcomingAiSpawn)
 end
 
 function OnScriptLoad()
@@ -475,7 +467,7 @@ function OnScriptLoad()
     cprint("Synced table: " .. sig_scan("????????8B52288B348A"))
     passwordAddress = read_dword(sig_scan("7740BA??????008D9B000000008A01") + 0x3)
     failMessageAddress = read_dword(sig_scan("B8????????E8??000000A1????????55") + 0x1)
-    if (passwordAddress and failMessageAddress) then
+    if passwordAddress and failMessageAddress then
         -- Remove "rcon command failure" message
         safe_write(true)
         write_byte(failMessageAddress, 0x0)
@@ -516,22 +508,20 @@ end
 -- Create a list of AI and Vehicles being spawned
 function OnObjectSpawn(playerIndex, tagId, parentId, objectId)
     local tag = blam.getTag(tagId)
-    if (tag) then
-        cprint("Index: " .. blam.getIndexById(objectId) .. " - " .. tag.path .. " - " .. objectId ..
-                   " Parent: " .. parentId .. " - " .. tag.class)
-        if (tag.class == blam.tagClasses.biped) then
-            if (playerIndex == 0) then
+    if tag then
+        if tag.class == blam.tagClasses.biped then
+            if playerIndex == 0 then
                 aiList[objectId] = tagId
                 upcomingAiSpawn[objectId] = tagId
             else
                 local customBipedTag = customPlayerBipeds[playerIndex]
-                if (customBipedTag) then
+                if customBipedTag then
                     return true, customBipedTag.id
                 end
             end
-        elseif (tag.class == blam.tagClasses.vehicle) then
+        elseif tag.class == blam.tagClasses.vehicle then
             VehiclesList[objectId] = tagId
-        elseif (tag.class == blam.tagClasses.deviceMachine) then
+        elseif tag.class == blam.tagClasses.deviceMachine then
             DeviceMachinesList[objectId] = {power = -1, position = -1}
         end
     end
@@ -540,7 +530,7 @@ end
 
 -- Cleanup
 function OnScriptUnload()
-    if (failMessageAddress) then
+    if failMessageAddress then
         -- Restore "rcon command failure" message
         safe_write(true)
         write_byte(rcon.failMessageAddress, 0x72)

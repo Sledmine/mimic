@@ -43,11 +43,13 @@ function core.debug(message, ...)
 end
 
 function core.encode(format, value)
+    -- TODO We might want to memoize this to improve performance
     return tohex(strpack(format, value))
 end
 local encode = core.encode
 
 function core.decode(format, value)
+    -- TODO We might want to memoize this to improve performance
     return strunpack(format, fromhex(value))
 end
 
@@ -79,18 +81,18 @@ function core.positionPacket(serverId, biped)
 end
 
 ---Create a packet string to spawn an AI
----@param serverId number
+---@param syncedIndex number
 ---@param biped biped
----@return string updatePacket
-function core.updatePacket(serverId, biped)
+---@return string? updatePacket
+function core.updatePacket(syncedIndex, biped)
     local invisible = 0
     if (biped.invisible) then
         invisible = 1
     end
-    if (blam.isNull(biped.vehicleObjectId)) then
+    if isNull(biped.vehicleObjectId) then
         return concat({
             "@u",
-            serverId,
+            syncedIndex,
             encode("f", biped.x),
             encode("f", biped.y),
             encode("f", biped.z),
@@ -98,16 +100,16 @@ function core.updatePacket(serverId, biped)
             biped.animationFrame,
             encode("f", biped.vX),
             encode("f", biped.vY),
-            color.decToHex(biped.redA, biped.greenA, biped.blueA),
+            color.decToHex(biped.colorAUpperRed, biped.colorAUpperGreen, biped.colorAUpperBlue),
             invisible
         }, packetSeparator)
     else
         local vehicle = blam.object(get_object(biped.vehicleObjectId))
         if vehicle then
-            -- TODO Check if this somehow works cause it used to be not returned from the function
+            -- TODO Check if this somehow works cause it did not have a return before
             return concat({
                 "@u",
-                serverId,
+                syncedIndex,
                 encode("f", vehicle.x),
                 encode("f", vehicle.y),
                 encode("f", vehicle.z),
@@ -115,7 +117,7 @@ function core.updatePacket(serverId, biped)
                 biped.animationFrame,
                 encode("f", biped.vX),
                 encode("f", biped.vY),
-                color.decToHex(biped.redA, biped.greenA, biped.blueA),
+                color.decToHex(biped.colorAUpperRed, biped.colorAUpperGreen, biped.colorAUpperBlue),
                 invisible
             }, packetSeparator)
         end
@@ -147,9 +149,9 @@ end
 
 function core.syncBiped(tagId, x, y, z, vX, vY, animation, animationFrame, r, g, b, invisible)
     local objectId = spawn_object(tagId, x, y, z)
-    if (objectId) then
+    if objectId then
         local biped = blam.biped(get_object(objectId))
-        if (biped) then
+        if biped then
             biped.x = x
             biped.y = y
             biped.z = z
@@ -172,9 +174,9 @@ function core.syncBiped(tagId, x, y, z, vX, vY, animation, animationFrame, r, g,
 end
 
 function core.updateBiped(objectId, x, y, z, vX, vY, animation, animationFrame, r, g, b, invisible)
-    if (objectId) then
+    if objectId then
         local biped = blam.biped(get_object(objectId))
-        if (biped and not biped.isHealthEmpty) then
+        if biped and not biped.isApparentlyDead then
             biped.x = x
             biped.y = y
             biped.z = z
@@ -242,7 +244,7 @@ end
 --- @param yaw number
 --- @param pitch number
 --- @param roll number
---- @return vector3D, vector3D
+--- @return vector3D, vector3D, vector3D
 function core.eulerToRotation(yaw, pitch, roll)
     local yaw = math.rad(yaw)
     local pitch = math.rad(-pitch) -- Negative pitch due to Sapien handling anticlockwise pitch
@@ -326,7 +328,7 @@ function core.adaptHSC(hscCommand)
         local objectName = params[2]
         for vehicleObjectId, vehicleTagId in pairs(VehiclesList) do
             local vehicle = blam.object(get_object(vehicleObjectId))
-            if (vehicle and not blam.isNull(vehicle.nameIndex)) then
+            if vehicle and not isNull(vehicle.nameIndex) then
                 local scenario = blam.scenario(0)
                 assert(scenario, "Failed to load scenario tag")
                 local objectScenarioName = scenario.objectNames[vehicle.nameIndex + 1]
@@ -397,18 +399,35 @@ function core.adaptHSC(hscCommand)
     return hscCommand
 end
 
+--- Get the synced network index of an object by object id
+---@param localObjectId number
+---@return number?
+function core.getSyncedIndexByObjectId(localObjectId)
+    for index = 0, 509 do
+        local objectId = blam.getObjectIdBySincedIndex(index)
+        if objectId and objectId == localObjectId then
+            return index
+        end
+    end
+    return nil
+end
+
 function core.dispatchAISpawn(upcomingAiSpawn)
     for objectId, tagId in pairs(upcomingAiSpawn) do
         local ai = blam.biped(get_object(objectId))
         if ai and not ai.isApparentlyDead then
-            if blam.isNull(ai.nameIndex) then
-                Broadcast(core.positionPacket(objectId, ai))
+            local syncedIndex = core.getSyncedIndexByObjectId(objectId)
+            assert(syncedIndex, "Failed to get synced index for object with id: " .. objectId)
+            if isNull(ai.nameIndex) then
+                -- Broadcast(core.positionPacket(objectId, ai))
+                Broadcast(core.positionPacket(syncedIndex, ai))
                 upcomingAiSpawn[objectId] = nil
             else
                 local bipedName = CurrentScenario.objectNames[ai.nameIndex + 1]
                 if (bipedName and bipedName == "captain_keyes" or bipedName == "free_marine_1" or
                     bipedName == "free_marine_2" or bipedName == "free_marine_3") then
-                    Broadcast(core.positionPacket(objectId, ai))
+                    -- Broadcast(core.positionPacket(objectId, ai))
+                    Broadcast(core.positionPacket(syncedIndex, ai))
                     upcomingAiSpawn[objectId] = nil
                     console_out("Biped " .. bipedName ..
                                     " is an exception that will be synced as AI")
