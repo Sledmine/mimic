@@ -721,7 +721,7 @@ local function tagClassFromInt(tagClassInt)
     return nil
 end
 
---- Return a list of object indexes that are currently spawned
+--- Return a list of object indexes that are currently spawned, indexed by their object id.
 ---@return number[]
 function blam.getObjects()
     local objects = {}
@@ -2633,10 +2633,17 @@ function blam.getObjectIdBySincedIndex(index)
             tableAddress = addressList.syncedNetworkObjects
         else
             tableAddress = read_dword(addressList.syncedNetworkObjects)
+            if tableAddress == 0 then
+                console_out("Synced objects table is not accesible yet.")
+                return nil
+            end
         end
 
         local syncedObjectsTable = createObject(tableAddress, syncedObjectsTable)
 
+        if syncedObjectsTable.objectsCount == 0 then
+            return nil
+        end
         if not syncedObjectsTable.initialized == 1 then
             return nil
         end
@@ -2752,7 +2759,7 @@ function blam.findTagsList(partialTagPath, searchTagType)
     for tagIndex = 0, blam.tagDataHeader.count - 1 do
         local tag = blam.getTag(tagIndex)
         if (tag and tag.path:find(partialTagPath, 1, true) and tag.class == searchTagType) then
-            if (not tagsList) then
+            if not tagsList then
                 tagsList = {}
             end
             tagsList[#tagsList + 1] = tag
@@ -2762,10 +2769,11 @@ function blam.findTagsList(partialTagPath, searchTagType)
 end
 
 local fmod = math.fmod
+--- Return the index of an id number
+---@param id number
 function blam.getIndexById(id)
     if id then
-        local index = fmod(id, 0x10000)
-        return index
+        return fmod(id, 0x10000)
     end
     return nil
 end
