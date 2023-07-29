@@ -1,9 +1,8 @@
 return {
-    syncDistance = 30,
+    syncDistance = 90,
     syncEveryMillisecs = 80,
-    syncBoundingRadius = 0.5,
+    syncBoundingRadius = 0.75,
     collectBipedsEveryMillisecs = 150,
     cleanBipedsEveryMillisecs = 10000,
-    bipedCandidateThreshold = 0.48,
-    considerOrphanBipedAfterSeconds = 3,
+    considerOrphanBipedAfterSeconds = 3
 }

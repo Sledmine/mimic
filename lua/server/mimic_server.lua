@@ -93,13 +93,13 @@ end
 function SyncAIData(playerIndex)
     -- Sync all the available AI
     -- TODO Add async function for this
-    for objectId in pairs(aiList) do
-        local ai = blam.biped(get_object(objectId))
-        if ai then
-            -- TODO Delay this to avoid lag at joining the server
-            Send(playerIndex, core.positionPacket(core.getSyncedIndexByObjectId(objectId), ai))
-        end
-    end
+    -- for objectId in pairs(aiList) do
+    --    local ai = blam.biped(get_object(objectId))
+    --    if ai then
+    --        -- TODO Delay this to avoid lag at joining the server
+    --        Send(playerIndex, core.positionPacket(core.getSyncedIndexByObjectId(objectId), ai))
+    --    end
+    -- end
     for objectId, group in pairs(DeviceMachinesList) do
         local device = blam.deviceMachine(get_object(objectId))
         if (device) then
@@ -126,30 +126,30 @@ function SyncDeadAI()
                 -- Biped is not a cinematic object
                 if isNull(ai.nameIndex) then
                     -- Biped is dead, send dead packet, then remove it from the sync list
-                    --if ai.isApparentlyDead and ai.health <= 0 then
+                    -- if ai.isApparentlyDead and ai.health <= 0 then
                     if not core.getSyncedIndexByObjectId(serverObjectId) then
                         -- local killPacket = core.deletePacket(serverObjectId)
                         -- FIXME We might need a better implementation cause synced index
                         -- is not alive anymore due to us getting it after biped death
                         -- we should have a hook to the synced index unregistering or keep a
                         -- cache or map of synced indexes to server object ids
-                        local killPacket = core.deletePacket(
-                                               core.getSyncedIndexByObjectId(serverObjectId))
+                        -- local killPacket = core.deletePacket(
+                        --                       core.getSyncedIndexByObjectId(serverObjectId))
                         -- Broadcast(killPacket)
-                        --if not aiCollection[serverObjectId] then
-                        --local mostRecentDamagerPlayer = ai.mostRecentDamagerPlayer
-                        --if not isNull(mostRecentDamagerPlayer) then
+                        -- if not aiCollection[serverObjectId] then
+                        -- local mostRecentDamagerPlayer = ai.mostRecentDamagerPlayer
+                        -- if not isNull(mostRecentDamagerPlayer) then
                         --    local playerIndex = core.getIndexById(mostRecentDamagerPlayer) + 1
                         --    local player = blam.player(get_player(playerIndex))
                         --    if (player) then
                         --        player.kills = player.kills + 1
                         --    end
-                        --end
+                        -- end
                         --    -- Set that this biped already has a timer asigned for collection
                         --    aiCollection[serverObjectId] = true
                         --    -- Set collector, it helps to ensure packet is sent more than once
                         --    timer(150, "CleanBipeds", serverObjectId)
-                        --end
+                        -- end
                         -- This biped does not exist anymore on the server, erase it from the list
                         aiList[serverObjectId] = nil
                     end
@@ -168,6 +168,15 @@ local function updateAI(ai, serverObjectId, syncedIndex)
     for playerIndex = 1, 16 do
         local player = blam.biped(get_dynamic_player(playerIndex))
         if player then
+            -- Filter server objects that are already synced
+            for playerIndex = 1, 16 do
+                local playerObjectAdress = get_dynamic_player(playerIndex)
+                local aiObjectAddress = get_object(serverObjectId)
+                -- AI is the same as the player, do not sync
+                if playerObjectAdress == aiObjectAddress then
+                    return
+                end
+            end
             if isNull(player.vehicleObjectId) then
                 if (core.objectIsNearTo(player, ai, constants.syncDistance) and
                     core.objectIsLookingAt(get_dynamic_player(playerIndex) --[[@as number]] ,
@@ -186,17 +195,12 @@ local function updateAI(ai, serverObjectId, syncedIndex)
                     -- FIXME Some times packet is nil, debug this
                     -- I think it is fixed now?? see return comment in the inner function
                     -- local updatePacket = core.updatePacket(serverObjectId, ai)
-                    local updatePacket = core.updatePacket(serverObjectId, ai)
-                    if updatePacket then
+                    local updatePacket = core.updatePacket(syncedIndex, ai)
+                    if syncedIndex and updatePacket then
                         Send(playerIndex, updatePacket)
                     end
                 end
             end
-        else
-            -- This was disabled as this forces every biped to be synced
-            -- Resulting on really low performance
-            -- local updatePacket = core.updatePacket(serverObjectId, ai)
-            -- send(playerIndex, updatePacket)
         end
     end
 end
@@ -208,7 +212,8 @@ function SyncUpdate()
     end
     local playersCount = tonumber(get_var(0, "$pn"))
     if playersCount > 0 then
-        for serverObjectId, tagId in pairs(aiList) do
+        -- for serverObjectId, tagId in pairs(aiList) do
+        for _, serverObjectId in pairs(core.getSyncedBipedIds()) do
             local ai = blam.biped(get_object(serverObjectId))
             if ai then
                 local syncedIndex = core.getSyncedIndexByObjectId(serverObjectId)
@@ -317,23 +322,33 @@ function OnGameEnd()
     ResetState()
 end
 
-function ShowCurrentSyncedObjects()
-    console_out("---------------------- SYNCED OBJECTS ----------------------")
+function ShowCurrentSyncedObjects(printTable)
+    -- console_out("---------------------- SYNCED OBJECTS ----------------------")
+    local count = 0
     for i = 0, 509 do
         local objectId = blam.getObjectIdBySincedIndex(i)
-        if objectId and not blam.isNull(objectId) then
-            local objectAddress = get_object(objectId)
-            local object = blam.object(objectAddress)
-            assert(object, "Object not found")
-            local format = "[%s] - %s - Object ID: %s"
-            console_out(format:format(i, blam.getTag(object.tagId).path, objectId))
+        if objectId then
+            count = count + 1
+            if printTable then
+                local objectAddress = get_object(objectId)
+                local object = blam.object(objectAddress)
+                if object then
+                    local format = "[%s] - %s - Object ID: %s"
+                    console_out(format:format(i, blam.getTag(object.tagId).path, objectId))
+                else
+                    local format = "[%s] - %s - Object ID: %s"
+                    console_out(format:format(i, "NULL", objectId))
+                end
+            end
         end
     end
+    console_out("Total synced objects: " .. count)
+    console_out("Total synced bipeds: " .. #core.getSyncedBipedIds())
     return true
 end
 
 function OnGameStart()
-    -- timer(1000, "ShowCurrentSyncedObjects")
+    timer(5000, "ShowCurrentSyncedObjects")
     console_out("-> Mimic version: " .. version)
     CurrentScenario = blam.scenario(0)
     -- Register available bipeds on the map
@@ -349,18 +364,18 @@ end
 
 function OnCommand(playerIndex, command, environment, rconPassword)
     local playerAdminLevel = tonumber(get_var(playerIndex, "$lvl"))
-    if (environment == 1) then
-        if (rconPassword == "coup") then
-            if (command:find("@")) then
+    if environment == 1 then
+        if rconPassword == "coup" then
+            if command:find("@") then
                 local data = split(command, ",")
                 local packetType = data[1]
-                if (packetType == "@r") then
-                    if (not CoopStarted) then
+                if packetType == "@r" then
+                    if not CoopStarted then
                         Broadcast(core.infoPacket(coop.registerVote(playerIndex), 4))
                     end
                     return false
-                elseif (packetType == "@b") then
-                    if (allowCustomBipeds) then
+                elseif packetType == "@b" then
+                    if allowCustomBipeds then
                         local desiredBipedTagId = tonumber(data[2])
                         for bipedName, bipedTag in pairs(mapBipedTags) do
                             if (bipedTag.id == desiredBipedTagId) then
@@ -386,7 +401,7 @@ function OnCommand(playerIndex, command, environment, rconPassword)
             execute_script("sv_kick " .. playerIndex)
             return false
         end
-        if (playerAdminLevel == 4) then
+        if playerAdminLevel == 4 then
             if startswith(command, "mdis") then
                 local data = split(command:gsub("\"", ""), " ")
                 local newRadius = tonumber(data[2])
@@ -408,6 +423,9 @@ function OnCommand(playerIndex, command, environment, rconPassword)
                 coop.enableSpawn(true)
                 say_all("Enabling all spawns by force!")
                 return false
+            elseif command:startswith "network_objects" then
+                ShowCurrentSyncedObjects(true)
+                return false
             elseif startswith(command, "mbullshit") then
                 local data = split(command:gsub("\"", ""), " ")
                 local serverId = tonumber(data[2]) --[[@as number]]
@@ -418,6 +436,40 @@ function OnCommand(playerIndex, command, environment, rconPassword)
                     Send(playerIndex, tag.path .. " - HP: " .. biped.health)
                 else
                     Send(playerIndex, "Warning, biped does not exist on the server.")
+                end
+                return false
+            elseif startswith(command, "spawn") then
+                local args = split(command:gsub("\"", ""), " ")
+                local tagClass = blam.tagClasses[args[2]] or args[2]
+                local tagName = args[3]
+                if tagClass and tagName then
+                    console_out(
+                        "Spawning object with tag class: " .. tagClass .. " and tag name: " ..
+                            tagName)
+                    local tag = blam.findTag(tagName, tagClass)
+                    if tag then
+                        local playerBiped = blam.biped(get_dynamic_player(playerIndex))
+                        if playerBiped then
+                            local objectX = playerBiped.x + playerBiped.cameraX * 3
+                            local objectY = playerBiped.y + playerBiped.cameraY * 3
+                            local objectZ = playerBiped.z + playerBiped.cameraZ * 3
+                            local objectId = spawn_object(tagClass, tag.path, objectX, objectY,
+                                                          objectZ)
+                            if objectId then
+                                local object = blam.object(get_object(objectId))
+                                if (object and not object.isOutSideMap) then
+                                    console_out("Object successfully spawned!", 0, 1, 0)
+                                    return false
+                                else
+                                    delete_object(objectId)
+                                    console_out(
+                                        "Error, specified object can not be spawned inside the map.",
+                                        1, 0, 0)
+                                    return false
+                                end
+                            end
+                        end
+                    end
                 end
                 return false
             end

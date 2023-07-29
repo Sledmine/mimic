@@ -190,10 +190,11 @@ function ProcessPacket(message, packetType, packet)
             end
         end
 
-        if aiData and aiData.tagId then
-            local tagId = aiData.tagId
-            local objectId = aiData.objectId
+        -- if aiData and aiData.tagId then
+        local objectId = blam.getObjectIdBySincedIndex(syncedIndex)
+        if objectId then
             if objectId and not isNull(get_object(objectId)) then
+                core.virtualizeBiped(blam.getObject(objectId))
                 core.updateBiped(objectId, x, y, z, vX, vY, animation, animationFrame, r, g, b,
                                  invisible)
                 -- local tag = blam.getTag(tagId)
@@ -202,7 +203,6 @@ function ProcessPacket(message, packetType, packet)
             else
                 error("Error, update packet received for non existing biped: " .. syncedIndex)
             end
-            aiData.lastUpdateAt = currentTime
         end
     elseif packetType == "@k" then
         local syncedIndex = tonumber(packet[2])
@@ -313,7 +313,7 @@ function OnTick()
     end
     if lastMapName ~= map then
         lastMapName = map
-        if (lastMapName == "ui") then
+        if lastMapName == "ui" then
             disablePlayerCollision = false
             dprint("Restoring client side projectiles...")
             execute_script("allow_client_side_weapon_projectiles 1")
@@ -321,13 +321,13 @@ function OnTick()
     end
     -- Start removing the server created bipeds only when the server aks for it
     if blam.isGameDedicated() then
-        if (disablePlayerCollision) then
-            local player = blam.biped(get_dynamic_player())
-            if (player) then
-                blam.bipedTag(player.tagId).disableCollision = true
+        if disablePlayerCollision then
+            local biped = blam.biped(get_dynamic_player())
+            if biped then
+                blam.bipedTag(biped.tagId).disableCollision = true
             end
         end
-        if enableSync then
+        if false then
             -- Filtering for objects that are being synced from the server
             for _, objectIndex in pairs(blam.getObjects()) do
                 local _, objectId = blam.getObject(objectIndex)
@@ -450,7 +450,7 @@ end
 function OnPacket(message)
     local packet = message:split(",")
     -- This is a packet sent from the server script for
-    if packet and packet[1]:find("@") then
+    if packet and packet[1]:includes("@") then
         local packetType = packet[1]
         if asyncMode then
             table.insert(queuePackets, {message, packetType, packet})
@@ -458,15 +458,17 @@ function OnPacket(message)
             ProcessPacket(message, packetType, packet)
         end
         return false
-    elseif message:find("sync_") then
+    elseif message:includes("sync_") then
         local data = message:split "sync_"
         local command = data[2]:gsub("'", "\"")
-        dprint("Sync command: %s", command)
         if DebugMode then
+            if DebugLevel >= 2 then
+                dprint("Sync command: %s", command)
+            end
             packetCount = packetCount + 1
         end
         execute_script(command)
-        if (command:find("camera_set")) then
+        if command:includes("camera_set") then
             local params = command:split " "
             local cutsceneCameraPoint = params[2]
             dprint("Unlocking cinematic camera: " .. cutsceneCameraPoint)
@@ -476,13 +478,13 @@ function OnPacket(message)
     elseif message == "disable_biped_collision" then
         disablePlayerCollision = true
         return false
-    elseif (message == "enable_biped_collision") then
+    elseif message == "enable_biped_collision" then
         disablePlayerCollision = false
         return false
-    elseif (message == "disable_client_side_projectiles") then
+    elseif message == "disable_client_side_projectiles" then
         clientSideProjectiles(false)
         return false
-    elseif (message == "enable_client_side_weapon_projectiles") then
+    elseif message == "enable_client_side_weapon_projectiles" then
         clientSideProjectiles(true)
         return false
     elseif (message == "open_coop_menu") then
@@ -495,19 +497,19 @@ end
 ---@param command string
 ---@return boolean
 function OnCommand(command)
-    if starts(command, "mdebug") or starts(command, "mimic_debug") then
+    if command:startswith "mdebug" or command:startswith "mimic_debug" then
         local params = command:split " "
-        if (#params > 1 and params[2]) then
+        if #params > 1 and params[2] then
             DebugLevel = tonumber(params[2])
         end
         DebugMode = not DebugMode
         console_out("Debug mode: " .. tostring(DebugMode))
         return false
-    elseif (command == "masync") then
+    elseif command == "mimic_async" then
         asyncMode = not asyncMode
         console_out("Async mode: " .. tostring(asyncMode))
         return false
-    elseif (command == "mcount") then
+    elseif command == "mimic_ai_count" then
         local count = 0
         for _, data in pairs(aiList) do
             if (data.objectId and get_object(data.objectId)) then
@@ -516,18 +518,19 @@ function OnCommand(command)
         end
         console_out(count)
         return false
-    elseif (command == "mcleaner" or command == "mcl") then
+    elseif command == "mcleaner" or command == "mcl" then
         bipedCleaner = not bipedCleaner
         console_out("Biped cleaner: " .. tostring(bipedCleaner))
         return false
-    elseif (command == "mversion") then
+    elseif command == "mimic_version" then
         console_out(scriptVersion)
         return false
-    elseif (command == "mspawn") then
+    elseif command == "mimic_force_spawn" then
         coop.enableSpawn()
         coop.loadCoopMenu(true)
         return false
     end
+    return true
 end
 
 function OnMenuAccept(widgetTagId)
@@ -571,13 +574,13 @@ function OnUnload()
 end
 
 function OnPreFrame()
-    if (DebugMode and (blam.isGameDedicated() or blam.isGameHost())) then
+    if DebugMode and (blam.isGameDedicated() or blam.isGameHost()) then
         draw_text(nearestAIDetails, bounds.left, bounds.top, bounds.right, bounds.bottom, font,
                   align, table.unpack(textColor))
-        draw_text(("AI: %s / Packets per second: %s"):format(#table.keys(aiList) -
-                                                                 #table.keys(aiCollection),
-                                                             packetsPerSecond), bounds.left,
-                  bounds.top + 30, bounds.right, bounds.bottom, font, align, table.unpack(textColor))
+        draw_text(("Synced Bipeds: %s / Mimic packets per second: %s"):format(
+                      #core.getSyncedBipedIds() - #table.keys(aiCollection), packetsPerSecond),
+                  bounds.left, bounds.top + 30, bounds.right, bounds.bottom, font, align,
+                  table.unpack(textColor))
     end
 end
 

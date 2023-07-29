@@ -8,7 +8,7 @@ local append = glue.append
 local shift = glue.shift
 local trim = glue.string.trim
 local escape = glue.string.esc
-local starts = luna.startswith
+local starts = luna.string.startswith
 local memoize = require "memoize"
 
 local blam = require "blam"
@@ -493,6 +493,22 @@ function core.objectIsLookingAt(player, target, sensitivity, zOffset, maximumDis
         end
     end
     return false
+end
+
+--- Get the synced biped ids
+---@return number[]
+function core.getSyncedBipedIds()
+    local syncedBipedIds = {}
+    for index = 0, 509 do
+        local objectId = blam.getObjectIdBySincedIndex(index)
+        if objectId then
+            local object = blam.object(get_object(objectId))
+            if object and object.class == blam.objectClasses.biped then
+                table.insert(syncedBipedIds, objectId)
+            end
+        end
+    end
+    return syncedBipedIds
 end
 
 return core
