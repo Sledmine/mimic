@@ -69,31 +69,34 @@ function core.getIndexById(id)
     return tonumber(concat(bytes, ""), 16)
 end
 
---- Create a position data packet
----@param biped blamObject
----@param serverId number
+--- Create an object color packet string
+---@param syncedIndex number
+---@param object blamObject
 ---@return string
-function core.positionPacket(serverId, biped)
-    return concat({
-        "@p",
-        serverId,
-        biped.tagId,
-        encode("f", biped.x),
-        encode("f", biped.y),
-        encode("f", biped.z)
+function core.objectColorPacket(syncedIndex, object)
+    local packet = concat({
+        "@c",
+        syncedIndex,
+        color.decToHex(object.colorAUpperRed, object.colorAUpperGreen, object.colorAUpperBlue),
+        color.decToHex(object.colorBUpperRed, object.colorBUpperGreen, object.colorBUpperBlue),
+        color.decToHex(object.colorCUpperRed, object.colorCUpperGreen, object.colorCUpperBlue),
+        color.decToHex(object.colorDUpperRed, object.colorDUpperGreen, object.colorDUpperBlue)
     }, packetSeparator)
+    assert(#packet <= 64, "Packet size is too big")
+    return packet
 end
 
----Create a packet string to spawn an AI
+---Create an object update packet string
 ---@param syncedIndex number
 ---@param biped biped
 ---@return string? updatePacket
 function core.updatePacket(syncedIndex, biped)
-    local invisible = 0
-    if (biped.invisible) then
-        invisible = 1
-    end
     if isNull(biped.vehicleObjectId) then
+        ---@type any
+        local weapon = {}
+        if not isNull(biped.firstWeaponObjectId) then
+            weapon = blam.weapon(get_object(biped.firstWeaponObjectId))
+        end
         return concat({
             "@u",
             syncedIndex,
@@ -103,9 +106,9 @@ function core.updatePacket(syncedIndex, biped)
             biped.animation,
             biped.animationFrame,
             encode("f", biped.vX),
-            encode("f", biped.vY),
-            color.decToHex(biped.colorAUpperRed, biped.colorAUpperGreen, biped.colorAUpperBlue),
-            invisible
+            encode("f", biped.vY)
+            -- weapon.primaryTriggerState
+            -- biped.shooting and 1 or 0
         }, packetSeparator)
     else
         local vehicle = blam.object(get_object(biped.vehicleObjectId))
@@ -114,26 +117,51 @@ function core.updatePacket(syncedIndex, biped)
             return concat({
                 "@u",
                 syncedIndex,
-                encode("f", vehicle.x),
-                encode("f", vehicle.y),
-                encode("f", vehicle.z),
+                encode("f", biped.x),
+                encode("f", biped.y),
+                encode("f", biped.z),
                 biped.animation,
                 biped.animationFrame,
                 encode("f", biped.vX),
-                encode("f", biped.vY),
-                color.decToHex(biped.colorAUpperRed, biped.colorAUpperGreen, biped.colorAUpperBlue),
-                invisible
+                encode("f", biped.vY)
             }, packetSeparator)
         end
     end
 end
 
-function core.deletePacket(serverId)
-    return concat({"@k", serverId}, packetSeparator)
-end
-
 function core.infoPacket(votesLeft, difficulty)
     return concat({"@i", votesLeft, difficulty}, packetSeparator)
+end
+
+--- Create a packet string to define object properties
+---@param syncedIndex number
+---@param biped biped
+function core.bipedPropertiesPacket(syncedIndex, biped)
+    local vehileSeatIndex
+    if not isNull(biped.vehicleSeatIndex) then
+        vehileSeatIndex = biped.vehicleSeatIndex
+    end
+    local packet = concat({
+        "@o",
+        syncedIndex,
+        -- concat({
+        biped.regionPermutation1,
+        biped.regionPermutation2,
+        biped.regionPermutation3,
+        biped.regionPermutation4,
+        biped.regionPermutation5,
+        biped.regionPermutation6,
+        biped.regionPermutation7,
+        biped.regionPermutation8,
+        -- }),
+        biped.invisible and 1 or 0,
+        core.getSyncedIndexByObjectId(biped.firstWeaponObjectId) or "",
+        core.getSyncedIndexByObjectId(biped.secondWeaponObjectId) or "",
+        core.getSyncedIndexByObjectId(biped.vehicleObjectId) or "",
+        vehileSeatIndex or ""
+    }, packetSeparator)
+    assert(#packet <= 64, "Packet size is too big")
+    return packet
 end
 
 --- Check if biped is near by to an object
@@ -177,7 +205,7 @@ function core.syncBiped(tagId, x, y, z, vX, vY, animation, animationFrame, r, g,
     return false
 end
 
-function core.updateBiped(objectId, x, y, z, vX, vY, animation, animationFrame, r, g, b, invisible)
+function core.updateObject(objectId, x, y, z, vX, vY, animation, animationFrame, r, g, b, isShooting)
     if objectId then
         local biped = blam.biped(get_object(objectId))
         if biped and not biped.isApparentlyDead then
@@ -189,10 +217,16 @@ function core.updateBiped(objectId, x, y, z, vX, vY, animation, animationFrame, 
             biped.animation = animation
             biped.animationFrame = animationFrame
             biped.zVel = 0
-            biped.redA = r
-            biped.greenA = g
-            biped.blueA = b
-            biped.invisible = invisible
+            -- biped.redA = r
+            -- biped.greenA = g
+            -- biped.blueA = b
+            if isShooting and not isNull(biped.firstWeaponObjectId) then
+                local weapon = blam.weapon(get_object(biped.firstWeaponObjectId))
+                if weapon then
+                    weapon.primaryTriggerState = isShooting
+
+                end
+            end
             return true
         end
     else
@@ -203,7 +237,7 @@ end
 
 --- "Virtualize" biped object, applies required transformations for easier network sync
 ---@param biped blamObject
-function core.virtualizeBiped(biped)
+function core.virtualizeObject(biped)
     biped.isGhost = false
     biped.isOutSideMap = false
     biped.isNotDamageable = true
@@ -448,18 +482,17 @@ local abs = math.abs
 local floor = math.floor
 
 --- Check if player is looking at object main frame
----@param player number
+---@param mainObject? number
 ---@param target number
 ---@param sensitivity number
 ---@param zOffset number
 ---@param maximumDistance number
-function core.objectIsLookingAt(player, target, sensitivity, zOffset, maximumDistance)
+function core.objectIsLookingAt(mainObject, target, sensitivity, zOffset, maximumDistance)
     -- Minimum amount for distance scaling
     local baselineSensitivity = 0.012
     local function read_vector3d(Address)
         return read_float(Address), read_float(Address + 0x4), read_float(Address + 0x8)
     end
-    local mainObject = player
     local targetObject = get_object(target)
     -- Both objects must exist
     if (targetObject and mainObject) then
@@ -509,6 +542,57 @@ function core.getSyncedBipedIds()
         end
     end
     return syncedBipedIds
+end
+
+--- Get the synced biped ids
+---@return number[]
+function core.getSyncedObjectsIds()
+    local syncedObjectsIds = {}
+    for index = 0, 509 do
+        local objectId = blam.getObjectIdBySincedIndex(index)
+        if objectId then
+            local object = blam.object(get_object(objectId))
+            if object then
+                table.insert(syncedObjectsIds, objectId)
+            end
+        end
+    end
+    return syncedObjectsIds
+end
+
+---Validate if a biped is syncable
+---@param biped biped
+function core.isBipedSynceable(biped)
+    -- Only sync ai inside the same bsp as the players
+    if not biped.isOutSideMap then
+        return true
+    end
+    return false
+end
+
+local syncableProperties = {
+    "regionPermutation1",
+    "regionPermutation2",
+    "regionPermutation3",
+    "regionPermutation4",
+    "regionPermutation5",
+    "regionPermutation6",
+    "regionPermutation7",
+    "regionPermutation8",
+    "invisible",
+    "firstWeaponObjectId",
+    "secondWeaponObjectId",
+    "vehicleObjectId",
+    "vehicleSeatIndex"
+}
+
+function core.isBipedPropertiesSyncable(biped, lastBipedProperties)
+    for _, property in pairs(syncableProperties) do
+        if biped[property] ~= lastBipedProperties[property] then
+            return true
+        end
+    end
+    return false
 end
 
 return core

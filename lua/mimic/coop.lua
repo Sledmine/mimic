@@ -80,17 +80,13 @@ end
 
 --- Determine if this player is a candidate for respawn point
 ---@param playerBiped blamObject
----@param playerIndex number
 ---@param exceptionPlayer? number
 ---@return boolean isCandidate
-function coop.isRespawnCandidate(playerBiped, playerIndex, exceptionPlayer)
-    if (playerBiped) then
-        local playerIndex = getIndexById(playerBiped.playerId)
-        return
-            not playerBiped.isOutSideMap and playerBiped.health > 0 and playerBiped.isOnGround and
-                playerIndex ~= exceptionPlayer
-    end
-    return false
+function coop.isRespawnCandidate(playerBiped, exceptionPlayer)
+    -- TODO Do we need this?
+    local playerIndex = getIndexById(playerBiped.playerId)
+    return not playerBiped.isOutSideMap and playerBiped.health > 0 and playerBiped.isOnGround and
+               playerIndex ~= exceptionPlayer
 end
 
 --- Update the game spawn given player biped object
@@ -99,13 +95,13 @@ end
 function coop.updateSpawn(playerBiped, playerIndex)
     local playerUsedForSpawn
     local scenario = blam.scenario(0)
-    if (scenario) then
+    if scenario then
         local playerName = get_var(playerIndex, "$name")
         local playerSpawns = scenario.spawnLocationList
         -- Update second player spawn point on the scenario
         -- Usually the first spawn point is for local/campaign purposes only
         -- TODO Check if a vehicle can use the is on ground flag as well
-        if (isNull(playerBiped.vehicleObjectId)) then
+        if isNull(playerBiped.vehicleObjectId) then
             playerUsedForSpawn = playerName
             for spawnIndex, spawn in pairs(playerSpawns) do
                 playerSpawns[spawnIndex].x = playerBiped.x
@@ -114,7 +110,7 @@ function coop.updateSpawn(playerBiped, playerIndex)
             end
         else
             local vehicle = blam.object(get_object(playerBiped.vehicleObjectId))
-            if (vehicle) then
+            if vehicle then
                 playerUsedForSpawn = playerName
                 for spawnIndex, spawn in pairs(playerSpawns) do
                     playerSpawns[spawnIndex].x = vehicle.x
@@ -130,18 +126,21 @@ function coop.updateSpawn(playerBiped, playerIndex)
     return nil
 end
 
+--- Find a new spawn point for the players
+---@param exceptionPlayerIndex? number Player index to ignore when searching for a new spawn
+---@return boolean
 function coop.findNewSpawn(exceptionPlayerIndex)
     local playerUsedForSpawn
-    if (not IsGameOnCinematic) then
+    if not IsGameOnCinematic then
         for playerIndex = 1, 16 do
             local playerBiped = blam.biped(get_dynamic_player(playerIndex))
-            if (playerBiped and player_present(playerIndex)) then
-                if (coop.isRespawnCandidate(playerBiped, exceptionPlayerIndex)) then
+            if playerBiped and player_present(playerIndex) then
+                if coop.isRespawnCandidate(playerBiped, exceptionPlayerIndex) then
                     playerUsedForSpawn = coop.updateSpawn(playerBiped, playerIndex)
                 end
             end
         end
-        if (playerUsedForSpawn) then
+        if playerUsedForSpawn then
             say_all("Using " .. playerUsedForSpawn .. " as respawn point..")
         else
             say_all("No respawn candidate was found!")
