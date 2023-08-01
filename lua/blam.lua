@@ -295,6 +295,8 @@ local dPadValues = {
     up = 765
 }
 
+local null = 0xFFFFFFFF
+
 -- Global variables
 
 ---	This is the current gametype that is running. If no gametype is running, this will be set to nil
@@ -1170,8 +1172,11 @@ local deviceGroupsTableStructure = {
 ---@field isCollideable boolean Enable/disable object collision, does not work with bipeds or vehicles
 ---@field hasNoCollision boolean Enable/disable object collision, causes animation problems
 ---@field model number Gbxmodel tag ID
+---@field scale number Object scale factor
 ---@field health number Current health of the object
+---@field maxHealth number Maximum health of the object
 ---@field shield number Current shield of the object
+---@field maxShield number Maximum shield of the object
 ---@field colorAUpperRed number Red color channel for A modifier
 ---@field colorAUpperGreen number Green color channel for A modifier
 ---@field colorAUpperBlue number Blue color channel for A modifier
@@ -1217,7 +1222,7 @@ local deviceGroupsTableStructure = {
 ---@field team number Object multiplayer team
 ---@field nameIndex number Index of object name in the scenario tag
 ---@field playerId number Current player id if the object
----@field parentId number Current parent id of the object
+---@field parentId number Current parent id of the object, needs testing
 ---//@field isHealthEmpty boolean Is the object health depleted, also marked as "dead"
 ---@field isApparentlyDead boolean Is the object apparently dead
 ---@field isSilentlyKilled boolean Is the object really dead
@@ -1233,6 +1238,7 @@ local deviceGroupsTableStructure = {
 ---@field regionPermutation6 number
 ---@field regionPermutation7 number
 ---@field regionPermutation8 number
+---@field parentObjectId number
 
 -- blamObject structure
 local objectStructure = {
@@ -1251,8 +1257,11 @@ local objectStructure = {
     isOutSideMap = {type = "bit", offset = 0x12, bitLevel = 5},
     isCollideable = {type = "bit", offset = 0x10, bitLevel = 24},
     model = {type = "dword", offset = 0x34},
+    scale = {type = "float", offset = 0xB0},
     health = {type = "float", offset = 0xE0},
+    maxHealth = {type = "float", offset = 0xD8},
     shield = {type = "float", offset = 0xE4},
+    maxShield = {type = "float", offset = 0xDC},
     ---@deprecated
     redA = {type = "float", offset = 0x1B8},
     ---@deprecated
@@ -1322,7 +1331,8 @@ local objectStructure = {
     regionPermutation5 = {type = "byte", offset = 0x184},
     regionPermutation6 = {type = "byte", offset = 0x185},
     regionPermutation7 = {type = "byte", offset = 0x186},
-    regionPermutation8 = {type = "byte", offset = 0x187}
+    regionPermutation8 = {type = "byte", offset = 0x187},
+    parentObjectId = {type = "dword", offset = 0x11C}
 }
 
 ---@class biped : blamObject
@@ -1357,6 +1367,10 @@ local objectStructure = {
 ---@field walkingState number Biped walking state, 0 = not walking, 1 = walking, 2 = stoping walking, 3 = stationary
 ---@field motionState number Biped motion state, 0 = standing , 1 = walking , 2 = jumping/falling
 ---@field mostRecentDamagerPlayer number Id of the player that caused the most recent damage to this biped
+---@field firstWeaponObjectId number First weapon object id
+---@field secondWeaponObjectId number Second weapon object id
+---@field thirdWeaponObjectId number Third weapon object id
+---@field fourthWeaponObjectId number Fourth weapon object id
 
 -- Biped structure (extends object structure)
 local bipedStructure = extendStructure(objectStructure, {
@@ -1381,7 +1395,7 @@ local bipedStructure = extendStructure(objectStructure, {
     shooting = {type = "float", offset = 0x284},
     weaponSlot = {type = "byte", offset = 0x2A1},
     zoomLevel = {type = "byte", offset = 0x320},
-    invisibleScale = {type = "byte", offset = 0x37C},
+    invisibleScale = {type = "float", offset = 0x37C},
     primaryNades = {type = "byte", offset = 0x31E},
     secondaryNades = {type = "byte", offset = 0x31F},
     landing = {type = "byte", offset = 0x508},
@@ -1390,7 +1404,11 @@ local bipedStructure = extendStructure(objectStructure, {
     vehicleSeatIndex = {type = "word", offset = 0x2F0},
     walkingState = {type = "char", offset = 0x503},
     motionState = {type = "byte", offset = 0x4D2},
-    mostRecentDamagerPlayer = {type = "dword", offset = 0x43C}
+    mostRecentDamagerPlayer = {type = "dword", offset = 0x43C},
+    firstWeaponObjectId = {type = "dword", offset = 0x2F8},
+    secondWeaponObjectId = {type = "dword", offset = 0x2FC},
+    thirdWeaponObjectId = {type = "dword", offset = 0x300},
+    fourthWeaponObjectId = {type = "dword", offset = 0x304}
 })
 
 -- Tag data header structure
@@ -1903,10 +1921,20 @@ local modelAnimationsStructure = {
 ---@class weapon : blamObject
 ---@field pressedReloadKey boolean Is weapon trying to reload
 ---@field isWeaponPunching boolean Is weapon playing melee or grenade animation
+---@field ownerObjectId number Object ID of the weapon owner
+---@field isInInventory boolean Is weapon in inventory
+---@field primaryTriggerState number Primary trigger state of the weapon
+---@field totalAmmo number Total ammo of the weapon
+---@field loadedAmmo number Loaded ammo of the weapon   
 
 local weaponStructure = extendStructure(objectStructure, {
     pressedReloadKey = {type = "bit", offset = 0x230, bitLevel = 3},
-    isWeaponPunching = {type = "bit", offset = 0x230, bitLevel = 4}
+    isWeaponPunching = {type = "bit", offset = 0x230, bitLevel = 4},
+    ownerObjectId = {type = "dword", offset = 0x11C},
+    isInInventory = {type = "bit", offset = 0x1F4, bitLevel = 0},
+    primaryTriggerState = {type = "byte", offset = 0x261},
+    totalAmmo = {type = "word", offset = 0x2B6},
+    loadedAmmo = {type = "word", offset = 0x2B8}
 })
 
 ---@class weaponTag
@@ -2157,11 +2185,13 @@ blam.tagDataHeader = createObject(addressList.tagDataHeader, tagDataHeaderStruct
 -- Add utilities to library
 blam.dumpObject = dumpObject
 blam.consoleOutput = consoleOutput
+blam.null = null
 
---- Get if a value equals a null value in game terms
+--- Get if given value equals a null value in game engine terms
+---@param value any
 ---@return boolean
 function blam.isNull(value)
-    if (value == 0xFF or value == 0xFFFF or value == 0xFFFFFFFF or value == nil) then
+    if value == 0xFF or value == 0xFFFF or value == null or value == nil then
         return true
     end
     return false
