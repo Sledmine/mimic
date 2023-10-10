@@ -137,9 +137,9 @@ end
 ---@param syncedIndex number
 ---@param biped biped
 function core.bipedPropertiesPacket(syncedIndex, biped)
-    local vehileSeatIndex
+    local vehicleSeatIndex
     if not isNull(biped.vehicleSeatIndex) then
-        vehileSeatIndex = biped.vehicleSeatIndex
+        vehicleSeatIndex = biped.vehicleSeatIndex
     end
     local packet = concat({
         "@o",
@@ -158,7 +158,8 @@ function core.bipedPropertiesPacket(syncedIndex, biped)
         core.getSyncedIndexByObjectId(biped.firstWeaponObjectId) or "",
         core.getSyncedIndexByObjectId(biped.secondWeaponObjectId) or "",
         core.getSyncedIndexByObjectId(biped.vehicleObjectId) or "",
-        vehileSeatIndex or ""
+        vehicleSeatIndex or "",
+        biped.flashlight and 1 or 0
     }, packetSeparator)
     assert(#packet <= 64, "Packet size is too big")
     return packet
@@ -562,15 +563,25 @@ end
 
 ---Validate if a biped is syncable
 ---@param biped biped
-function core.isBipedSynceable(biped)
+---@param objectId number
+function core.isBipedSynceable(biped, objectId)
+    -- Filter server bipeds that are already synced
+    for playerIndex = 1, 16 do
+        local playerObjectAdress = get_dynamic_player(playerIndex)
+        local aiObjectAddress = get_object(objectId)
+        -- AI is the same as the player, do not sync
+        if playerObjectAdress == aiObjectAddress then
+            return false
+        end
+    end
     -- Only sync ai inside the same bsp as the players
-    if not biped.isOutSideMap then
+    if not biped.isOutSideMap and isNull(biped.nameIndex) then
         return true
     end
     return false
 end
 
-local syncableProperties = {
+local synceableProperties = {
     "regionPermutation1",
     "regionPermutation2",
     "regionPermutation3",
@@ -583,11 +594,12 @@ local syncableProperties = {
     "firstWeaponObjectId",
     "secondWeaponObjectId",
     "vehicleObjectId",
-    "vehicleSeatIndex"
+    "vehicleSeatIndex",
+    "flashlight"
 }
 
-function core.isBipedPropertiesSyncable(biped, lastBipedProperties)
-    for _, property in pairs(syncableProperties) do
+function core.isBipedPropertiesSynceable(biped, lastBipedProperties)
+    for _, property in pairs(synceableProperties) do
         if biped[property] ~= lastBipedProperties[property] then
             return true
         end

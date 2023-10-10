@@ -9,9 +9,7 @@ local blam = require "blam"
 objectClasses = blam.objectClasses
 tagClasses = blam.tagClasses
 local isNull = blam.isNull
-local harmony = require "mods.harmony"
 local core = require "mimic.core"
-local coop = require "mimic.coop"
 local hsc = require "mimic.hsc"
 local scriptVersion = require "mimic.version"
 local luna = require "luna"
@@ -82,7 +80,6 @@ end
 
 function OnMapLoad()
     gameStarted = false
-    CoopStarted = false
     queuePackets = {}
     aiList = {}
     frozenBipeds = {}
@@ -180,17 +177,13 @@ local function processPacket(message, packetType, packet)
                     local object = blam.getObject(objectId)
                     if object then
                         core.virtualizeObject(object)
-                        core.updateObject(objectId, x, y, z, vX, vY, animation, animationFrame, r, g,
-                                         b, primaryTriggerState)
+                        core.updateObject(objectId, x, y, z, vX, vY, animation, animationFrame, r,
+                                          g, b, primaryTriggerState)
                     end
                 else
                     error("Error, update packet received for non existing object: " .. syncedIndex)
                 end
             end
-        elseif packetType == "@i" then
-            local votesLeft = packet[2]
-            local difficulty = packet[3]
-            coop.updateCoopInfo(votesLeft, difficulty)
         elseif packetType == "@o" then
             local syncedIndex = tonumber(packet[2])
             assert(syncedIndex, "Error, synced index is not valid")
@@ -215,45 +208,56 @@ local function processPacket(message, packetType, packet)
                 local secondWeaponObjectSyncedIndex = tonumber(packet[13])
                 local vehicleObjectSyncedIndex = tonumber(packet[14])
                 local vehicleSeatIndex = tonumber(packet[15])
+                local flashlight = tonumber(packet[16]) == 1
 
-                -- Sync biped properties
-                biped.invisible = invisible
-                biped.invisibleScale = 1
-
-                -- Sync region permutations
-                for regionIndex, permutation in pairs(regions) do
-                    biped["regionPermutation" .. regionIndex] = permutation
-                end
-
-                -- Sync equipment
-                if vehicleObjectSyncedIndex and vehicleSeatIndex then
-                    local vehicleObjectId = blam.getObjectIdBySincedIndex(vehicleObjectSyncedIndex)
-                    if vehicleObjectId then
-                        balltze.unit_enter_vehicle(objectId, vehicleObjectId, vehicleSeatIndex)
+                if biped then
+                    -- Sync biped properties
+                    biped.invisible = invisible
+                    if invisible then
+                        biped.invisibleScale = 1
                     end
-                end
+                    biped.flashlight = flashlight
 
-                if firstWeaponObjectSyncedIndex then
-                    local weaponObjectId = blam.getObjectIdBySincedIndex(
-                                               firstWeaponObjectSyncedIndex) or blam.null
-                    biped.firstWeaponObjectId = weaponObjectId
-                    local weapon = blam.weapon(get_object(weaponObjectId))
-                    if weapon then
-                        weapon.isOutSideMap = false
-                        weapon.isInInventory = true
-                        -- weapon.ownerObjectId = objectId
-                        -- weapon.parentObjectId = objectId
-                        -- weapon.parentId = objectId
-                        -- biped.weaponSlot = 0
+                    -- Sync region permutations
+                    for regionIndex, permutation in pairs(regions) do
+                        biped["regionPermutation" .. regionIndex] = permutation
                     end
-                end
-                if secondWeaponObjectSyncedIndex then
-                    biped.secondWeaponObjectId = blam.getObjectIdBySincedIndex(
-                                                     secondWeaponObjectSyncedIndex) or blam.null
-                    local weapon = blam.weapon(get_object(weaponObjectId))
-                    if weapon then
-                        weapon.isOutSideMap = false
-                        weapon.isInInventory = true
+
+                    -- Sync equipment
+                    if vehicleObjectSyncedIndex and vehicleSeatIndex then
+                        local vehicleObjectId = blam.getObjectIdBySincedIndex(
+                                                    vehicleObjectSyncedIndex)
+                        if vehicleObjectId then
+                            balltze.unit_enter_vehicle(objectId, vehicleObjectId, vehicleSeatIndex)
+                        end
+                    end
+
+                    if isNull(biped.playerId) then
+                        if firstWeaponObjectSyncedIndex then
+                            local weaponObjectId =
+                                blam.getObjectIdBySincedIndex(firstWeaponObjectSyncedIndex) or
+                                    blam.null
+                            biped.firstWeaponObjectId = weaponObjectId
+                            local weapon = blam.weapon(get_object(weaponObjectId))
+                            if weapon then
+                                weapon.isOutSideMap = false
+                                weapon.isInInventory = true
+                                -- weapon.ownerObjectId = objectId
+                                -- weapon.parentObjectId = objectId
+                                -- weapon.parentId = objectId
+                                -- biped.weaponSlot = 0
+                            end
+                        end
+                        if secondWeaponObjectSyncedIndex then
+                            biped.secondWeaponObjectId =
+                                blam.getObjectIdBySincedIndex(secondWeaponObjectSyncedIndex) or
+                                    blam.null
+                            local weapon = blam.weapon(get_object(weaponObjectId))
+                            if weapon then
+                                weapon.isOutSideMap = false
+                                weapon.isInInventory = true
+                            end
+                        end
                     end
                 end
             end
@@ -282,10 +286,6 @@ end
 
 local function onGameStart()
     gameStarted = true
-    if map:includes("coop_evolved") then
-        enableSync = true
-        availableBipeds = coop.loadCoopMenu()
-    end
 end
 
 function OnTick()
@@ -295,16 +295,6 @@ function OnTick()
     if enableSync and gameStarted then
         -- Constantly erase locally created AI bipeds
         execute_script("ai_erase_all")
-        -- Check if map is a coop evolved map
-        if map:includes("coop_evolved") then
-            local biped = blam.biped(get_dynamic_player())
-            if biped then
-                if lastPlayerTagId ~= biped.tagId then
-                    lastPlayerTagId = biped.tagId
-                    coop.swapFirstPerson()
-                end
-            end
-        end
     end
     if lastMapName ~= map then
         lastMapName = map
@@ -400,9 +390,6 @@ function OnPacket(message)
     elseif message == "enable_client_side_weapon_projectiles" then
         clientSideProjectiles(true)
         return false
-    elseif (message == "open_coop_menu") then
-        availableBipeds = coop.loadCoopMenu(true)
-        return false
     end
 end
 
@@ -423,47 +410,8 @@ function OnCommand(command)
         console_out("Async mode: " .. tostring(asyncMode))
         return false
     elseif command == "mimic_version" then
-        console_out(scriptVersion)
+        console_out(scriptVersion)        
         return false
-    elseif command == "mimic_force_spawn" then
-        coop.enableSpawn()
-        coop.loadCoopMenu(true)
-        return false
-    end
-    return true
-end
-
-function OnMenuAccept(widgetTagId)
-    if map:find("coop_evolved") then
-        local widgetTag = blam.getTag(widgetTagId)
-        if widgetTag then
-            if widgetTag.path:includes("ready_button") then
-                local rconCommand = "rcon coup @r,1"
-                dprint(rconCommand)
-                execute_script(rconCommand)
-            elseif widgetTag.path:includes("biped_buttons") then
-                local tagSplit = split(widgetTag.path, "\\")
-                local buttonTagName = tagSplit[#tagSplit]
-                local desiredBipedIndex = tonumber(split(buttonTagName, "biped_")[2])
-                if blam.isGameDedicated() then
-                    local rconCommand = "rcon coup @b," .. availableBipeds[desiredBipedIndex].id
-                    dprint(rconCommand)
-                    execute_script(rconCommand)
-                else
-                    local globals = blam.globalsTag()
-                    if globals then
-                        local player = blam.player(get_player())
-                        if player then
-                            local mpInfo = globals.multiplayerInformation
-                            mpInfo[1].unit = coop.loadCoopMenu(false)[desiredBipedIndex].id
-                            console_out("Replacing biped...")
-                            globals.multiplayerInformation = mpInfo
-                            delete_object(player.objectId)
-                        end
-                    end
-                end
-            end
-        end
     end
     return true
 end
@@ -492,5 +440,3 @@ set_callback("command", "OnCommand")
 set_callback("tick", "OnTick")
 set_callback("rcon message", "OnPacket")
 set_callback("preframe", "OnPreFrame")
-
-harmony.set_callback("menu accept", "OnMenuAccept")

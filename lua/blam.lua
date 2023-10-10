@@ -545,8 +545,11 @@ end
 ---@param green? number
 ---@param blue? number
 function console_out(message, red, green, blue)
-    -- TODO Add color printing to this function on SAPP
-    cprint(message)
+    if red then
+        local colorIndex = red
+        return cprint(message, colorIndex)
+    end
+    return cprint(message)
 end
 
 ---Return true if the player has the console open, always returns true on SAPP.
@@ -2036,12 +2039,35 @@ local projectileStructure = extendStructure(objectStructure, {
 ---@field host number Check if player is host, 0 when host, null when not
 ---@field name string Name of this player
 ---@field team number Team color of this player, 0 when red, 1 when on blue team
+---@field interactionObjectId number Object ID of the object this player is interacting with
+---@field interactonObjectType number Type of the object this player is interacting with
+---@field interactionObjectSeat number Seat of the object this player is interacting with
+---@field respawnTime number Time in ticks until this player respawns
+---@field respawnGrowthTime number Time in ticks until this player respawns
 ---@field objectId number Return the objectId associated to this player
+---@field lastObjectId number Return the last objectId associated to this player
+---@field lastFireTime number Return the last fire time associated to this player
+---@field name2 string Name of this player
 ---@field color number Color of the player, only works on "Free for All" gametypes
+---@field machineIndex number Machine index of this player
+---@field controllerIndex number Controller index of this player
+---@field team2 number Team color of this player, 0 when red, 1 when on blue team
 ---@field index number Local index of this player 0-15
+---@field invisibilityTime number Time in ticks until this player is invisible
 ---@field speed number Current speed of this player
----@field ping number Ping amount from server of this player in milliseconds
+---@field teleporterFlagId number Unknown
+---@field objectiveMode number Unknown
+---@field objectivePlayerId number Unknown
+---@field targetPlayerId number Player id the player is looking at
+---@field targetTime number Some timer for fading in the name of the player being looked at
+---@field lastDeathTime number Time in ticks since this player last died
+---@field slayerTargetPlayerId number Unknown
+---@field oddManOut number Is player odd man out
+---@field killStreak number Current kill streak of this player
+---@field multiKill number Current multi kill of this player
+---@field lastKillTime number Time in ticks since this player last killed
 ---@field kills number Kills quantity done by this player
+---@field ping number Ping amount from server of this player in milliseconds
 ---@field assists number Assists count of this player
 ---@field betraysAndSuicides number Betrays plus suicides count of this player
 ---@field deaths number Deaths count of this player
@@ -2051,17 +2077,56 @@ local playerStructure = {
     id = {type = "word", offset = 0x0},
     host = {type = "word", offset = 0x2},
     name = {type = "ustring", forced = true, offset = 0x4},
+    unknown = {type = "byte", offset = 0x1C},
     team = {type = "byte", offset = 0x20},
+    unknown2 = {type = "byte", offset = 0x21},
+    unknown3 = {type = "byte", offset = 0x22},
+    unknown4 = {type = "byte", offset = 0x23},
+    interactionObjectId = {type = "dword", offset = 0x24},
+    interactionObjectType = {type = "word", offset = 0x28},
+    interactionObjectSeat = {type = "word", offset = 0x2A},
+    respawnTime = {type = "dword", offset = 0x2C},
+    respawnGrowthTime = {type = "dword", offset = 0x30},
     objectId = {type = "dword", offset = 0x34},
+    lastObjectId = {type = "dword", offset = 0x38},
+    unknown5 = {type = "dword", offset = 0x3C},
+    unknown6 = {type = "dword", offset = 0x40},
+    lastFireTime = {type = "dword", offset = 0x44},
+    name2 = {type = "ustring", forced = true, offset = 0x48},
     color = {type = "word", offset = 0x60},
+    unknown7 = {type = "word", offset = 0x62},
+    machineIndex = {type = "byte", offset = 0x64},
+    controllerIndex = {type = "byte", offset = 0x65},
+    team2 = {type = "byte", offset = 0x66},
     index = {type = "byte", offset = 0x67},
+    invisibilityTime = {type = "word", offset = 0x68},
+    unknown8 = {type = "word", offset = 0x6A},
     speed = {type = "float", offset = 0x6C},
-    ping = {type = "dword", offset = 0xDC},
+    teleporterFlagId = {type = "dword", offset = 0x70}, -- Unknown
+    objectiveMode = {type = "dword", offset = 0x74}, -- Unknown
+    objectivePlayerId = {type = "dword", offset = 0x78}, -- Unknown
+    targetPlayerId = {type = "dword", offset = 0x7C}, -- Player id the player is looking at?
+    targetTime = {type = "dword", offset = 0x80}, -- Some timer for fading in the name of the player being looked at?
+    lastDeathTime = {type = "dword", offset = 0x84},
+    slayerTargetPlayerId = {type = "dword", offset = 0x88},
+    oddManOut = {type = "dword", offset = 0x8C}, -- Player is odd man out
+    unknown9 = {type = "dword", offset = 0x90},
+    unknown10 = {type = "word", offset = 0x94},
+    killStreak = {type = "word", offset = 0x96},
+    multiKill = {type = "word", offset = 0x98},
+    lastKillTime = {type = "word", offset = 0x9A},
     kills = {type = "word", offset = 0x9C},
+    ping = {type = "dword", offset = 0xDC},
     assists = {type = "word", offset = 0XA4},
     betraysAndSuicides = {type = "word", offset = 0xAC},
     deaths = {type = "word", offset = 0xAE},
-    suicides = {type = "word", offset = 0XB0}
+    suicides = {type = "word", offset = 0xB0},
+    --[[
+        Appears to be some kind of tick or packet counter, when defined to specific value it will
+        cause the player to desync and show the "connection problems icon"
+        Counts up to 31 and then resets to 0
+    ]]
+    unknownTimer1 = {type = "dword", offset = 0xE8},
 }
 
 ---@class firstPersonInterface
@@ -2108,14 +2173,14 @@ local bipedTagStructure = {
 ---@field powerGroupIndex number Power index from the device groups table
 ---@field power number Position amount of this device machine
 ---@field powerChange number Power change of this device machine
----@field positonGroupIndex number Power index from the device groups table
+---@field positionGroupIndex number Power index from the device groups table
 ---@field position number Position amount of this device machine
 ---@field positionChange number Position change of this device machine
 local deviceMachineStructure = extendStructure(objectStructure, {
     powerGroupIndex = {type = "word", offset = 0x1F8},
     power = {type = "float", offset = 0x1FC},
     powerChange = {type = "float", offset = 0x200},
-    positonGroupIndex = {type = "word", offset = 0x204},
+    positionGroupIndex = {type = "word", offset = 0x204},
     position = {type = "float", offset = 0x208},
     positionChange = {type = "float", offset = 0x20C}
 })

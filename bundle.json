@@ -11,7 +11,6 @@
         "memoize",
         "luna",
         "mimic.core",
-        "mimic.coop",
         "mimic.hsc",
         "mimic.constants",
         "mimic.version",
