@@ -211,11 +211,6 @@ local function processPacket(message, packetType, packet)
                 local flashlight = tonumber(packet[16]) == 1
 
                 if biped then
-                    -- Sync biped properties
-                    biped.invisible = invisible
-                    if invisible then
-                        biped.invisibleScale = 1
-                    end
                     biped.flashlight = flashlight
 
                     -- Sync region permutations
@@ -223,16 +218,23 @@ local function processPacket(message, packetType, packet)
                         biped["regionPermutation" .. regionIndex] = permutation
                     end
 
-                    -- Sync equipment
-                    if vehicleObjectSyncedIndex and vehicleSeatIndex then
-                        local vehicleObjectId = blam.getObjectIdBySincedIndex(
-                                                    vehicleObjectSyncedIndex)
-                        if vehicleObjectId then
-                            balltze.unit_enter_vehicle(objectId, vehicleObjectId, vehicleSeatIndex)
-                        end
-                    end
-
                     if isNull(biped.playerId) then
+                        -- Sync biped properties
+                        biped.invisible = invisible
+                        if invisible then
+                            biped.invisibleScale = 1
+                        end
+
+                        -- Sync equipment
+                        if vehicleObjectSyncedIndex and vehicleSeatIndex then
+                            local vehicleObjectId =
+                                blam.getObjectIdBySincedIndex(vehicleObjectSyncedIndex)
+                            if vehicleObjectId then
+                                balltze.unit_enter_vehicle(objectId, vehicleObjectId,
+                                                           vehicleSeatIndex)
+                            end
+                        end
+
                         if firstWeaponObjectSyncedIndex then
                             local weaponObjectId =
                                 blam.getObjectIdBySincedIndex(firstWeaponObjectSyncedIndex) or
@@ -249,9 +251,10 @@ local function processPacket(message, packetType, packet)
                             end
                         end
                         if secondWeaponObjectSyncedIndex then
-                            biped.secondWeaponObjectId =
+                            local weaponObjectId =
                                 blam.getObjectIdBySincedIndex(secondWeaponObjectSyncedIndex) or
                                     blam.null
+                            biped.secondWeaponObjectId = weaponObjectId
                             local weapon = blam.weapon(get_object(weaponObjectId))
                             if weapon then
                                 weapon.isOutSideMap = false
@@ -410,7 +413,7 @@ function OnCommand(command)
         console_out("Async mode: " .. tostring(asyncMode))
         return false
     elseif command == "mimic_version" then
-        console_out(scriptVersion)        
+        console_out(scriptVersion)
         return false
     end
     return true
