@@ -118,6 +118,7 @@ local function updateNetworkObject(playerIndex, ai, serverObjectId, syncedIndex)
         -- Prevents AI from running out of ammo
         local aiWeapon = blam.weapon(get_object(ai.firstWeaponObjectId))
         if aiWeapon then
+            -- TODO We should not use this
             aiWeapon.totalAmmo = 999
         end
         -- Sync AI biped if it is near to the player
@@ -156,6 +157,8 @@ function SyncGameStart(playerIndex)
     return false
 end
 
+local lastObjectStatePerPlayer = {}
+
 ---Syncs game data required constantly during the game
 function SyncUpdate(playerIndex)
     for syncedIndex = 0, 509 do
@@ -163,15 +166,17 @@ function SyncUpdate(playerIndex)
         if objectId then
             local object = blam.object(get_object(objectId))
             -- TODO Confirm if we need to sync player bipeds state too
-            if object and object.class == objectClasses.biped and isNull(object.playerId) then
+            -- if object and object.class == objectClasses.biped and isNull(object.playerId) then
+            if object and object.class == objectClasses.biped then
                 local biped = blam.biped(get_object(objectId))
                 assert(biped, "Biped not found")
-                local lastBipedState = bipedsState[syncedIndex] or {}
-                if core.isBipedPropertiesSynceable(biped, lastBipedState) then
-                    bipedsState[syncedIndex] = blam.dumpObject(biped)
+                local lastObjectState = lastObjectStatePerPlayer[playerIndex][syncedIndex] or {}
+                if core.isBipedPropertiesSynceable(biped, lastObjectState) then
+                    lastObjectState = blam.dumpObject(biped)
+                    lastObjectStatePerPlayer[playerIndex][syncedIndex] = lastObjectState
                     Send(playerIndex, core.bipedPropertiesPacket(syncedIndex, biped))
                 end
-                if biped.colorALowerBlue ~= lastBipedState.colorALowerBlue then
+                if biped.colorALowerBlue ~= lastObjectState.colorALowerBlue then
                     Send(playerIndex, core.objectColorPacket(syncedIndex, biped))
                 end
             end
@@ -213,6 +218,7 @@ function RegisterPlayerSync(playerIndex)
         log("debug", "Player sync index is " .. string.tohex(player.index))
         log("debug", "Player " .. player.name .. " ping is " .. player.ping .. "ms")
         log("debug", "SyncUpdate timer for player " .. playerIndex .. " set to " .. interval .. "ms")
+        lastObjectStatePerPlayer[playerIndex] = {}
         set_timer(interval, "SyncUpdate" .. playerIndex)
     end
     return false
@@ -309,7 +315,7 @@ function OnTick()
     if bspIndex ~= currentBspIndex then
         currentBspIndex = bspIndex
         console_out("New bsp index detected: " .. currentBspIndex)
-        --TODO Call find new spawn function from lua external call if possible
+        -- TODO Call find new spawn function from lua external call if possible
         Broadcast("sync_switch_bsp " .. currentBspIndex)
     end
 
@@ -397,9 +403,9 @@ function OnCommand(playerIndex, command, environment, rconPassword)
                 end
                 say_all("Mimic synchronization rate: " .. constants.syncEveryMillisecs)
                 return false
-            elseif command:startswith "network_objects" then
-                ShowCurrentSyncedObjects(true)
-                return false
+                -- elseif command:startswith "network_objects" then
+                --    ShowCurrentSyncedObjects(true)
+                --    return false
             elseif startswith(command, "mbullshit") then
                 local data = split(command:gsub("\"", ""), " ")
                 local serverId = tonumber(data[2]) --[[@as number]]
@@ -410,39 +416,6 @@ function OnCommand(playerIndex, command, environment, rconPassword)
                     Send(playerIndex, tag.path .. " - HP: " .. biped.health)
                 else
                     Send(playerIndex, "Warning, biped does not exist on the server.")
-                end
-                return false
-            elseif startswith(command, "spawn") then
-                local args = split(command:gsub("\"", ""), " ")
-                local tagClass = blam.tagClasses[args[2]] or args[2]
-                local tagName = args[3]
-                if tagClass and tagName then
-                    console_out(
-                        "Spawning object with tag class: " .. tagClass .. " and tag name: " ..
-                            tagName)
-                    local tag = blam.findTag(tagName, tagClass)
-                    if tag then
-                        local playerBiped = blam.biped(get_dynamic_player(playerIndex))
-                        if playerBiped then
-                            local objectX = playerBiped.x + playerBiped.cameraX * 3
-                            local objectY = playerBiped.y + playerBiped.cameraY * 3
-                            local objectZ = playerBiped.z + playerBiped.cameraZ * 3
-                            local objectId = spawn_object(tagClass, tag.path, objectX, objectY,
-                                                          objectZ)
-                            if objectId then
-                                local object = blam.object(get_object(objectId))
-                                if object and not object.isOutSideMap then
-                                    say(playerIndex, "Object successfully spawned!")
-                                    return false
-                                else
-                                    delete_object(objectId)
-                                    say(playerIndex,
-                                        "Error, specified object can not be spawned inside the map.")
-                                    return false
-                                end
-                            end
-                        end
-                    end
                 end
                 return false
             end
