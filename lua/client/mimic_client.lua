@@ -20,7 +20,7 @@ local color = require "ncolor"
 local concat = table.concat
 local constants = require "mimic.constants"
 local inspect = require "inspect"
-local balltze = require "mods.balltze"
+local isBalltzeAvailable, balltze = pcall(require, "mods.balltze")
 
 -- Script settings variables (do not modify them manually)
 DebugMode = false
@@ -106,7 +106,9 @@ local function processPacket(message, packetType, packet)
     if DebugMode then
         packetCount = packetCount + 1
         if DebugLevel >= 2 then
-            dprint("Received packet %s size %s message: %s", packetType, #message, message)
+            if not packetType:startswith "@u" then
+                dprint("Received packet %s size %s message: %s", packetType, #message, message)
+            end
         end
     end
     if packetType:startswith "@" then
@@ -176,6 +178,10 @@ local function processPacket(message, packetType, packet)
                 if objectId and not isNull(get_object(objectId)) then
                     local object = blam.getObject(objectId)
                     if object then
+                        if object.isOutSideMap then
+                            dprint("Warning, Object with sync index " .. syncedIndex ..
+                                       " is outside map")
+                        end
                         core.virtualizeObject(object)
                         core.updateObject(objectId, x, y, z, vX, vY, animation, animationFrame, r,
                                           g, b, primaryTriggerState)
@@ -218,6 +224,7 @@ local function processPacket(message, packetType, packet)
                         biped["regionPermutation" .. regionIndex] = permutation
                     end
 
+                    -- Sync biped properties only if biped is not a player
                     if isNull(biped.playerId) then
                         -- Sync biped properties
                         biped.invisible = invisible
@@ -230,8 +237,10 @@ local function processPacket(message, packetType, packet)
                             local vehicleObjectId =
                                 blam.getObjectIdBySincedIndex(vehicleObjectSyncedIndex)
                             if vehicleObjectId then
-                                balltze.unit_enter_vehicle(objectId, vehicleObjectId,
-                                                           vehicleSeatIndex)
+                                if isBalltzeAvailable then
+                                    balltze.unit_enter_vehicle(objectId, vehicleObjectId,
+                                                               vehicleSeatIndex)
+                                end
                             end
                         end
 
@@ -244,6 +253,7 @@ local function processPacket(message, packetType, packet)
                             if weapon then
                                 weapon.isOutSideMap = false
                                 weapon.isInInventory = true
+                                weapon.isGhost = false
                                 -- weapon.ownerObjectId = objectId
                                 -- weapon.parentObjectId = objectId
                                 -- weapon.parentId = objectId
@@ -259,6 +269,7 @@ local function processPacket(message, packetType, packet)
                             if weapon then
                                 weapon.isOutSideMap = false
                                 weapon.isInInventory = true
+                                weapon.isGhost = false
                             end
                         end
                     end
@@ -430,10 +441,13 @@ function OnPreFrame()
     if DebugMode and (blam.isGameDedicated() or blam.isGameHost()) then
         draw_text(nearestAIDetails, bounds.left, bounds.top, bounds.right, bounds.bottom, font,
                   align, table.unpack(textColor))
+
         local syncDetails = "Network objects: %s / Synced Bipeds: %s / Mimic packets per second: %s"
-        draw_text(syncDetails:format(#core.getSyncedObjectsIds(), #core.getSyncedBipedIds(),
-                                     packetsPerSecond), bounds.left, bounds.top + 30, bounds.right,
-                  bounds.bottom, font, align, table.unpack(textColor))
+        local networkObjectsCount = #table.keys(core.getSyncedObjectsIds())
+        local syncedBipedsCount = #table.keys(core.getSyncedBipedIds())
+        draw_text(syncDetails:format(networkObjectsCount, syncedBipedsCount, packetsPerSecond),
+                  bounds.left, bounds.top + 30, bounds.right, bounds.bottom, font, align,
+                  table.unpack(textColor))
     end
 end
 
