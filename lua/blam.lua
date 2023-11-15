@@ -3,7 +3,20 @@
 -- Sledmine, JerryBrick
 -- Easier memory handle and provides standard functions for scripting
 ------------------------------------------------------------------------------
-local blam = {_VERSION = "1.8.0"}
+local cos = math.cos
+local sin = math.sin
+local atan = math.atan
+local pi = math.pi
+math.atan2 = math.atan2 or function(y, x)
+    return atan(y / x) + (x < 0 and pi or 0)
+end
+local atan2 = math.atan2
+local sqrt = math.sqrt
+local fmod = math.fmod
+local rad = math.rad
+local deg = math.deg
+
+local blam = {_VERSION = "1.9.0"}
 
 ------------------------------------------------------------------------------
 -- Useful functions for internal usage
@@ -51,11 +64,13 @@ local function split(s, sep)
     return array
 end
 
+local null = 0xFFFFFFFF
+
 --- Get if given value equals a null value in game engine terms
 ---@param value any
 ---@return boolean
 function blam.isNull(value)
-    if value == 0xFF or value == 0xFFFF or value == 0xFFFFFFFF or value == null or value == nil then
+    if value == 0xFF or value == 0xFFFF or value == null or value == nil then
         return true
     end
     return false
@@ -163,7 +178,7 @@ local tagClasses = {
     particleSystem = "pctl",
     particle = "part",
     physics = "phys",
-    placeHolder = "plac",
+    placeholder = "plac",
     pointPhysics = "pphy",
     preferencesNetworkGame = "ngpr",
     projectile = "proj",
@@ -340,8 +355,6 @@ local dPadValues = {
     down = 769,
     up = 765
 }
-
-local null = 0xFFFFFFFF
 
 local engineConstants = {defaultNetworkObjectsCount = 509}
 
@@ -1042,7 +1055,6 @@ end
 
 local function readTable(address, propertyData)
     local table = {}
-    -- local elementsCount = read_byte(address - 0x4)
     local elementsCount = read_dword(address - 0x4)
     local firstElement = read_dword(address)
     for elementPosition = 1, elementsCount do
@@ -3078,7 +3090,6 @@ function blam.findTagsList(partialTagPath, searchTagType)
     return tagsList
 end
 
-local fmod = math.fmod
 --- Return the index of an id number
 ---@param id number
 function blam.getIndexById(id)
@@ -3108,20 +3119,20 @@ end
 --- @param yaw number
 --- @param pitch number
 --- @param roll number
---- @return vector3D, vector3D, table
-local function eulerToRotation(yaw, pitch, roll)
-    local yaw = math.rad(yaw)
-    local pitch = math.rad(-pitch) -- Negative pitch due to Sapien handling anticlockwise pitch
-    local roll = math.rad(roll)
+--- @return vector3D, vector3D
+local function eulerAnglesToVectors(yaw, pitch, roll)
+    local yaw = rad(yaw)
+    local pitch = rad(-pitch) -- Negative pitch due to Sapien handling anticlockwise pitch
+    local roll = rad(roll)
     local matrix = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}
 
     -- Roll, Pitch, Yaw = a, b, y
-    local cosA = math.cos(roll)
-    local sinA = math.sin(roll)
-    local cosB = math.cos(pitch)
-    local sinB = math.sin(pitch)
-    local cosY = math.cos(yaw)
-    local sinY = math.sin(yaw)
+    local cosA = cos(roll)
+    local sinA = sin(roll)
+    local cosB = cos(pitch)
+    local sinB = sin(pitch)
+    local cosY = cos(yaw)
+    local sinY = sin(yaw)
 
     matrix[1][1] = cosB * cosY
     matrix[1][2] = -cosB * sinY
@@ -3133,120 +3144,78 @@ local function eulerToRotation(yaw, pitch, roll)
     matrix[3][2] = sinA * cosY + cosA * sinB * sinY
     matrix[3][3] = cosA * cosB
 
-    local rollVector = {x = matrix[1][1], y = matrix[2][1], z = matrix[3][1]}
-    local yawVector = {x = matrix[1][3], y = matrix[2][3], z = matrix[3][3]}
-    return rollVector, yawVector, matrix
+    local v1 = {x = matrix[1][1], y = matrix[2][1], z = matrix[3][1]}
+    local v2 = {x = matrix[1][3], y = matrix[2][3], z = matrix[3][3]}
+
+    return v1, v2
 end
 
 --- Get euler angles rotation from game rotation vectors
---- @param rollVector vector3D
---- @param yawVector vector3D
---- @return number, number, number, table
-local function rotationToEuler(rollVector, yawVector)
-    -- Calculate the roll angle (around x-axis)
-    ---@diagnostic disable-next-line: deprecated
-    local roll = (math.atan2 or math.atan)(rollVector.y, rollVector.z)
-
-    -- Calculate the yaw angle (around z-axis)
-    ---@diagnostic disable-next-line: deprecated
-    local yaw = (math.atan2 or math.atan)(yawVector.x, yawVector.y)
-
-    -- Calculate the pitch angle (around y-axis)
-    local pitch = math.asin(-yawVector.z)
-
-    -- Create the rotation matrix
-    local cosRoll = math.cos(roll)
-    local sinRoll = math.sin(roll)
-    local cosYaw = math.cos(yaw)
-    local sinYaw = math.sin(yaw)
-    local cosPitch = math.cos(pitch)
-    local sinPitch = math.sin(pitch)
-
-    local matrix = {
-        {
-            cosYaw * cosRoll - sinYaw * sinPitch * sinRoll,
-            -cosYaw * sinRoll - sinYaw * sinPitch * cosRoll,
-            sinYaw * cosPitch
-        },
-        {
-            sinYaw * cosRoll + cosYaw * sinPitch * sinRoll,
-            -sinYaw * sinRoll + cosYaw * sinPitch * cosRoll,
-            -cosYaw * cosPitch
-        },
-        {cosPitch * sinRoll, cosPitch * cosRoll, sinPitch}
+--- @param v1 vector3D Vector with first column values from rotation matrix
+--- @param v2 vector3D Vector with third column values from rotation matrix
+--- @return number yaw, number pitch, number roll
+local function vectorsToEulerAngles(v1, v2)
+    local v3 = {
+        x = v1.y * v2.z - v1.z * v2.y,
+        y = v1.z * v2.x - v1.x * v2.z,
+        z = v1.x * v2.y - v1.y * v2.x
     }
 
-    return math.deg(yaw), -math.deg(pitch), math.deg(roll), matrix
+    local matrix = {{v1.x, v3.x, v2.x}, {v1.y, v3.y, v2.y}, {v1.z, v3.z, v2.z}}
+
+    -- Extract individual matrix elements
+    local m11, m12, m13 = matrix[1][1], matrix[1][2], matrix[1][3]
+    local m21, m22, m23 = matrix[2][1], matrix[2][2], matrix[2][3]
+    local m31, m32, m33 = matrix[3][1], matrix[3][2], matrix[3][3]
+
+    -- Calculate yaw (heading) angle
+    local yaw = atan2(m12, m11)
+
+    -- Calculate pitch (attitude) angle
+    local pitch = atan2(-m13, sqrt(m23 ^ 2 + m33 ^ 2))
+
+    -- Calculate roll (bank) angle
+    local roll = -atan2(m23, m33)
+
+    -- Convert angles from radians to degrees
+    yaw = deg(yaw)
+    pitch = deg(pitch)
+    roll = deg(roll)
+
+    -- Adjust angles to the range [0, 359]
+    yaw = fmod(yaw + 360, 360)
+    pitch = fmod(pitch + 360, 360)
+    roll = fmod(roll + 360, 360)
+
+    return yaw, pitch, roll
 end
 
--- @param rollVector table
--- @param yawVector table
--- @return number, number, number, table
-local function rotationToEulerAbsolute(rollVector, yawVector)
-    ---@diagnostic disable-next-line: deprecated
-    local roll = (math.atan2 or math.atan)(rollVector.y, rollVector.z)
-
-    -- Calculate the yaw angle (around z-axis)
-    ---@diagnostic disable-next-line: deprecated
-    local yaw = (math.atan2 or math.atan)(yawVector.x, yawVector.y)
-
-    -- Calculate the pitch angle (around y-axis)
-    local pitch = math.asin(-yawVector.z)
-
-    -- Create the rotation matrix
-    local cosRoll = math.cos(roll)
-    local sinRoll = math.sin(roll)
-    local cosYaw = math.cos(yaw)
-    local sinYaw = math.sin(yaw)
-    local cosPitch = math.cos(pitch)
-    local sinPitch = math.sin(pitch)
-
-    local matrix = {
-        {
-            cosYaw * cosRoll - sinYaw * sinPitch * sinRoll,
-            -cosYaw * sinRoll - sinYaw * sinPitch * cosRoll,
-            sinYaw * cosPitch
-        },
-        {
-            sinYaw * cosRoll + cosYaw * sinPitch * sinRoll,
-            -sinYaw * sinRoll + cosYaw * sinPitch * cosRoll,
-            -cosYaw * cosPitch
-        },
-        {cosPitch * sinRoll, cosPitch * cosRoll, sinPitch}
-    }
-
-    -- Calculate absolute angles (0 to 360 degrees)
-    local absYaw = (yaw >= 0) and math.deg(yaw) or math.deg(yaw) + 360
-    local absPitch = (pitch >= 0) and math.deg(pitch) or math.deg(pitch) + 360
-    local absRoll = (roll >= 0) and math.deg(roll) or math.deg(roll) + 360
-
-    return absYaw, absPitch, absRoll, matrix
-end
-
---- Get euler angles rotation from game rotation vectors
+--- Get rotation angles from game object
 ---
---- EXPERIMENTAL, values may not be accurate to rotation from Sapien
----@param rollVector vector3D
----@param yawVector vector3D
-function blam.getRotationFromVectors(rollVector, yawVector)
-    return rotationToEuler(rollVector, yawVector)
+--- Assuming clockwise rotation and absolute angles from 0 to 360
+---@param object blamObject
+---@return number yaw, number pitch, number roll
+function blam.getObjectRotation(object)
+    local v1 = {x = object.vX, y = object.vY, z = object.vZ}
+    local v2 = {x = object.v2X, y = object.v2Y, z = object.v2Z}
+    return vectorsToEulerAngles(v1, v2)
 end
 
 --- Rotate object into desired angles
----@param objectId number
+---
+--- Assuming clockwise rotation and absolute angles from 0 to 360
+---@param object blamObject
 ---@param yaw number
 ---@param pitch number
 ---@param roll number
-function blam.rotateObject(objectId, yaw, pitch, roll)
-    local rollVector, yawVector, matrix = eulerToRotation(yaw, pitch, roll)
-    local object = blam.object(get_object(objectId))
-    assert(object, "Object not found")
-    object.vX = rollVector.x
-    object.vY = rollVector.y
-    object.vZ = rollVector.z
-    object.v2X = yawVector.x
-    object.v2Y = yawVector.y
-    object.v2Z = yawVector.z
+function blam.rotateObject(object, yaw, pitch, roll)
+    local v1, v2 = eulerAnglesToVectors(yaw, pitch, roll)
+    object.vX = v1.x
+    object.vY = v1.y
+    object.vZ = v1.z
+    object.v2X = v2.x
+    object.v2Y = v2.y
+    object.v2Z = v2.z
 end
 
 --- Get screen resolution
