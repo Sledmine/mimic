@@ -25,11 +25,11 @@ local isBalltzeAvailable, balltze = pcall(require, "mods.balltze")
 -- Script settings variables (do not modify them manually)
 DebugMode = false
 DebugLevel = 1
+local virtualParentedObjects = {}
 local lastMapName
 local enableSync = false
 local asyncMode = false
 local disablePlayerCollision = false
-local bipedCleaner = true
 local gameStarted = false
 
 -- Debug draw thing
@@ -45,11 +45,6 @@ local timeSinceLastPacket = 0
 -- State
 local queuePackets = {}
 ---@type aiData[]
-local aiList = {}
-local aiCollection = {}
-local availableBipeds = {}
-local frozenBipeds = {}
-local lastPlayerTagId
 
 function dprint(message, ...)
     if DebugMode then
@@ -81,9 +76,6 @@ end
 function OnMapLoad()
     gameStarted = false
     queuePackets = {}
-    aiList = {}
-    frozenBipeds = {}
-    lastPlayerTagId = nil
 end
 
 ---@class aiData
@@ -116,12 +108,13 @@ local function processPacket(message, packetType, packet)
             local syncedIndex = tonumber(packet[2])
             assert(syncedIndex, "Error, synced index is not valid")
 
-            local objectId = blam.getObjectIdBySincedIndex(syncedIndex)
+            local objectId = blam.getObjectIdBySyncedIndex(syncedIndex)
             if objectId then
                 local colorA = packet[3]
                 local colorB = packet[4]
                 local colorC = packet[5]
                 local colorD = packet[6]
+                local shaderPermutationIndex = tonumber(packet[7]) or 0
 
                 local object = blam.object(get_object(objectId))
                 if object then
@@ -156,6 +149,8 @@ local function processPacket(message, packetType, packet)
                     object.colorDLowerGreen = g
                     object.colorDUpperBlue = b
                     object.colorDLowerBlue = b
+
+                    object.shaderPermutationIndex = shaderPermutationIndex
                 end
             end
         elseif packetType == "@u" then
@@ -169,11 +164,11 @@ local function processPacket(message, packetType, packet)
             local z = core.decode("f", packet[5])
             local animation = tonumber(packet[6])
             local animationFrame = tonumber(packet[7])
-            local vX = core.decode("f", packet[8])
-            local vY = core.decode("f", packet[9])
-            -- local primaryTriggerState = tonumber(packet[10])
+            local yaw = core.decode("f", packet[8])
+            local pitch = core.decode("f", packet[9])
+            local roll = core.decode("f", packet[10])
 
-            local objectId = blam.getObjectIdBySincedIndex(syncedIndex)
+            local objectId = blam.getObjectIdBySyncedIndex(syncedIndex)
             if objectId then
                 if objectId and not isNull(get_object(objectId)) then
                     local object = blam.getObject(objectId)
@@ -183,8 +178,8 @@ local function processPacket(message, packetType, packet)
                                        " is outside map")
                         end
                         core.virtualizeObject(object)
-                        core.updateObject(objectId, x, y, z, vX, vY, animation, animationFrame, r,
-                                          g, b, primaryTriggerState)
+                        core.updateObject(objectId, x, y, z, yaw, pitch, roll, animation,
+                                          animationFrame)
                     end
                 else
                     error("Error, update packet received for non existing object: " .. syncedIndex)
@@ -194,84 +189,133 @@ local function processPacket(message, packetType, packet)
             local syncedIndex = tonumber(packet[2])
             assert(syncedIndex, "Error, synced index is not valid")
 
-            local objectId = blam.getObjectIdBySincedIndex(syncedIndex)
-            if objectId then
-                local biped = blam.biped(get_object(objectId))
+            local objectId = blam.getObjectIdBySyncedIndex(syncedIndex)
+            if not objectId then
+                return
+            end
+            local unit = blam.unit(get_object(objectId))
+            if not unit then
+                return
+            end
 
-                local regions = {
-                    tonumber(packet[3]),
-                    tonumber(packet[4]),
-                    tonumber(packet[5]),
-                    tonumber(packet[6]),
-                    tonumber(packet[7]),
-                    tonumber(packet[8]),
-                    tonumber(packet[9]),
-                    tonumber(packet[10])
-                }
+            local isBiped = unit.class == objectClasses.biped
+            local isVehicle = unit.class == objectClasses.vehicle
 
-                local invisible = tonumber(packet[11]) == 1
-                local firstWeaponObjectSyncedIndex = tonumber(packet[12])
-                local secondWeaponObjectSyncedIndex = tonumber(packet[13])
-                local vehicleObjectSyncedIndex = tonumber(packet[14])
-                local vehicleSeatIndex = tonumber(packet[15])
-                local flashlight = tonumber(packet[16]) == 1
+            if isBiped then
+                unit = blam.biped(get_object(objectId))
+            elseif isVehicle then
+                unit = blam.vehicle(get_object(objectId))
+            end
+            if not unit then
+                return
+            end
 
-                if biped then
-                    biped.flashlight = flashlight
+            local regions = {
+                tonumber(packet[3]),
+                tonumber(packet[4]),
+                tonumber(packet[5]),
+                tonumber(packet[6]),
+                tonumber(packet[7]),
+                tonumber(packet[8]),
+                tonumber(packet[9]),
+                tonumber(packet[10])
+            }
 
-                    -- Sync region permutations
-                    for regionIndex, permutation in pairs(regions) do
-                        biped["regionPermutation" .. regionIndex] = permutation
+            local isCamoActive = tonumber(packet[11]) == 1
+            local parentObjectSyncedIndex = tonumber(packet[12])
+            local parentSeatIndex = tonumber(packet[13])
+            local team = tonumber(packet[14])
+
+            -- Sync region permutations
+            for regionIndex, permutation in pairs(regions) do
+                unit["regionPermutation" .. regionIndex] = permutation
+            end
+
+            -- Sync unit properties only if it does not belong to a player
+            if not isNull(unit.playerId) then
+                return
+            end
+
+            -- Sync unit properties
+            unit.isCamoActive = isCamoActive
+            if isCamoActive then
+                unit.camoScale = 1
+            end
+
+            -- Sync team
+            if isBiped then
+                unit.team = team or blam.null
+            end
+
+            -- Sync parent vehicle
+            if isVehicle then
+                -- TODO Release new balltze to support exiting vehicles, as of today
+                -- game by default syncs bipeds existing vehicles but not entering, we are
+                -- covered in that part thanks to balltze.
+                -- 
+                -- However vehicles do not sync exiting other units so after making them enter
+                -- they will be stuck inside the other vehicle
+                return
+            end
+            if parentObjectSyncedIndex and parentSeatIndex then
+                local parentObjectId = blam.getObjectIdBySyncedIndex(parentObjectSyncedIndex)
+                if parentObjectId then
+                    if not isBalltzeAvailable then
+                        console_out("Balltze is not available, unit vehicle entering is not supported")
+                        return
                     end
+                    balltze.unit_enter_vehicle(objectId, parentObjectId, parentSeatIndex)
+                end
+            end
+        elseif packetType == "@b" then
+            local syncedIndex = tonumber(packet[2])
+            assert(syncedIndex, "Error, synced index is not valid")
 
-                    -- Sync biped properties only if biped is not a player
-                    if isNull(biped.playerId) then
-                        -- Sync biped properties
-                        biped.invisible = invisible
-                        if invisible then
-                            biped.invisibleScale = 1
-                        end
+            local objectId = blam.getObjectIdBySyncedIndex(syncedIndex)
+            if not objectId then
+                return
+            end
+            local biped = blam.biped(get_object(objectId))
+            if not biped then
+                return
+            end
 
-                        -- Sync equipment
-                        if vehicleObjectSyncedIndex and vehicleSeatIndex then
-                            local vehicleObjectId =
-                                blam.getObjectIdBySincedIndex(vehicleObjectSyncedIndex)
-                            if vehicleObjectId then
-                                if isBalltzeAvailable then
-                                    balltze.unit_enter_vehicle(objectId, vehicleObjectId,
-                                                               vehicleSeatIndex)
-                                end
-                            end
-                        end
+            local firstWeaponObjectSyncedIndex = tonumber(packet[3])
+            local secondWeaponObjectSyncedIndex = tonumber(packet[4])
+            local flashlight = tonumber(packet[5]) == 1
 
-                        if firstWeaponObjectSyncedIndex then
-                            local weaponObjectId =
-                                blam.getObjectIdBySincedIndex(firstWeaponObjectSyncedIndex) or
-                                    blam.null
-                            biped.firstWeaponObjectId = weaponObjectId
-                            local weapon = blam.weapon(get_object(weaponObjectId))
-                            if weapon then
-                                weapon.isOutSideMap = false
-                                weapon.isInInventory = true
-                                weapon.isGhost = false
-                                -- weapon.ownerObjectId = objectId
-                                -- weapon.parentObjectId = objectId
-                                -- weapon.parentId = objectId
-                                -- biped.weaponSlot = 0
-                            end
-                        end
-                        if secondWeaponObjectSyncedIndex then
-                            local weaponObjectId =
-                                blam.getObjectIdBySincedIndex(secondWeaponObjectSyncedIndex) or
-                                    blam.null
-                            biped.secondWeaponObjectId = weaponObjectId
-                            local weapon = blam.weapon(get_object(weaponObjectId))
-                            if weapon then
-                                weapon.isOutSideMap = false
-                                weapon.isInInventory = true
-                                weapon.isGhost = false
-                            end
-                        end
+            biped.flashlight = flashlight
+
+            if not isNull(biped.playerId) then
+                return
+            end
+
+            if firstWeaponObjectSyncedIndex then
+                local weaponObjectId = blam.getObjectIdBySyncedIndex(firstWeaponObjectSyncedIndex)
+                if weaponObjectId then
+                    local weapon = blam.weapon(get_object(weaponObjectId))
+                    if weapon and isNull(weapon.playerId) then
+                        biped.firstWeaponObjectId = weaponObjectId
+                        weapon.isOutSideMap = false
+                        weapon.isInInventory = true
+                        -- TODO Check if player or weapon are inside map and both are not ghost
+                        -- This caused a crash when player was inside map and weapon was not or something like that
+                        -- weapon.isGhost = false
+                    end
+                end
+            end
+            -- Theorically AI can not hold a second weapon so this is not needed.. yet it would be
+            -- cool to have it later as a feature
+            -- if secondWeaponObjectSyncedIndex then
+            if false and secondWeaponObjectSyncedIndex then
+                local weaponObjectId = blam.getObjectIdBySyncedIndex(secondWeaponObjectSyncedIndex)
+                if weaponObjectId then
+                    biped.secondWeaponObjectId = weaponObjectId
+                    local weapon = blam.weapon(get_object(weaponObjectId))
+                    if weapon then
+                        weapon.isOutSideMap = false
+                        weapon.isInInventory = true
+                        weapon.isGhost = false
                     end
                 end
             end
@@ -348,17 +392,19 @@ function OnTick()
             end
         end
     end
-end
-
-local function clientSideProjectiles(enable)
-    if enable then
-        dprint("ENABLING client side projectiles...")
-        execute_script("allow_client_side_weapon_projectiles 1")
-        return true
+    for objectId, parentObjectId in pairs(virtualParentedObjects) do
+        local object = blam.object(get_object(objectId))
+        if object then
+            local parentObject = blam.object(get_object(parentObjectId))
+            if parentObject then
+                object.x = parentObject.x + object.x
+                object.y = parentObject.y + object.y
+                object.z = parentObject.z + object.z
+            end
+        else
+            virtualParentedObjects[objectId] = nil
+        end
     end
-    dprint("DISABLING client side projectiles...")
-    execute_script("allow_client_side_weapon_projectiles 0")
-    return false
 end
 
 --- OnPacket
@@ -398,12 +444,6 @@ function OnPacket(message)
     elseif message == "enable_biped_collision" then
         disablePlayerCollision = false
         return false
-    elseif message == "disable_client_side_projectiles" then
-        clientSideProjectiles(false)
-        return false
-    elseif message == "enable_client_side_weapon_projectiles" then
-        clientSideProjectiles(true)
-        return false
     end
 end
 
@@ -433,7 +473,6 @@ end
 function OnUnload()
     if ticks() > 0 then
         disablePlayerCollision = false
-        clientSideProjectiles(true)
     end
 end
 

@@ -19,7 +19,7 @@ local harmonySapp = ffi.load("./harmony_s.dll")
 
 -- Lua modules
 local luna = require "luna"
-local split = luna.string.split
+local split = string.split
 local startswith = string.startswith
 
 -- Halo Custom Edition modules
@@ -40,19 +40,13 @@ local failMessageAddress
 local serverRcon
 
 -- State
-local aiCollection = {}
-local mapBipedTags = {}
-local upcomingAiSpawn = {}
-VehiclesList = {}
-DeviceMachinesList = {}
+VehiclesList = {} -- Global cause we need to access it from core module
+local deviceMachinesList = {}
 IsGameOnCinematic = false
-local allowCustomBipeds = true
-VotesList = {}
 CoopStarted = false
 LastSyncCommand = ""
 local currentBspIndex
-CurrentScenario = nil
-local bipedsState = {}
+local currentScenario = nil
 
 ---Log to console
 ---@param type "info" | "error" | "warning" | "debug"
@@ -77,10 +71,10 @@ function Send(playerIndex, message)
 end
 
 function SyncHSC(_, hscMimicCommand)
-    if (hscMimicCommand ~= "nd" and LastSyncCommand ~= hscMimicCommand) then
+    if hscMimicCommand ~= "nd" and LastSyncCommand ~= hscMimicCommand then
         LastSyncCommand = hscMimicCommand
         local syncCommand = core.adaptHSC(hscMimicCommand)
-        if (syncCommand) then
+        if syncCommand then
             console_out("Syncing: " .. syncCommand)
             Broadcast(syncCommand)
         end
@@ -90,17 +84,18 @@ function SyncHSC(_, hscMimicCommand)
 end
 
 function SyncGameState(playerIndex)
-    for objectId, group in pairs(DeviceMachinesList) do
+    for objectId, group in pairs(deviceMachinesList) do
         local device = blam.deviceMachine(get_object(objectId))
         if device then
             -- Only sync device machines that are name based due to mimic client limitations
             if not isNull(device.nameIndex) then
-                local name = CurrentScenario.objectNames[device.nameIndex + 1]
+                assert(currentScenario, "No current scenario tag found")
+                local name = currentScenario.objectNames[device.nameIndex + 1]
                 if name then
                     Send(playerIndex, "sync_device_set_power " .. name .. " " ..
-                             DeviceMachinesList[objectId].power)
+                             deviceMachinesList[objectId].power)
                     Send(playerIndex, "sync_device_set_position_immediate " .. name .. " " ..
-                             DeviceMachinesList[objectId].position)
+                             deviceMachinesList[objectId].position)
                 end
             end
         end
@@ -109,39 +104,41 @@ end
 
 --- Syncs all bipeds in the map
 ---@param playerIndex number
----@param ai biped
+---@param ai unit
 ---@param serverObjectId number
 ---@param syncedIndex number
 local function updateNetworkObject(playerIndex, ai, serverObjectId, syncedIndex)
     local player = blam.biped(get_dynamic_player(playerIndex))
-    if player then
-        -- Prevents AI from running out of ammo
-        local aiWeapon = blam.weapon(get_object(ai.firstWeaponObjectId))
-        if aiWeapon then
-            -- TODO We should not use this
-            aiWeapon.totalAmmo = 999
-        end
-        -- Sync AI biped if it is near to the player
-        if isNull(player.vehicleObjectId) then
-            if (core.objectIsNearTo(player, ai, constants.syncDistance) and
-                core.objectIsLookingAt(get_dynamic_player(playerIndex) --[[@as number]] ,
-                                       serverObjectId, constants.syncBoundingRadius, 0,
-                                       constants.syncDistance)) then
-                local updatePacket = core.updatePacket(syncedIndex, ai)
-                if updatePacket and syncedIndex then
-                    Send(playerIndex, updatePacket)
-                end
+    if not player then
+        return
+    end
+    -- Prevents AI from running out of ammo
+    -- local aiWeapon = blam.weapon(get_object(ai.firstWeaponObjectId))
+    -- if aiWeapon then
+    --    -- TODO We should not use this
+    --    aiWeapon.totalAmmo = 999
+    -- end
+    -- Sync AI biped if it is near to the player
+    if isNull(player.vehicleObjectId) then
+        if (core.objectIsNearTo(player, ai, constants.syncDistance) and
+            core.objectIsLookingAt(get_dynamic_player(playerIndex) --[[@as number]] ,
+                                   serverObjectId, constants.syncBoundingRadius, 0,
+                                   constants.syncDistance)) then
+            local updatePacket = core.updateObjectPacket(syncedIndex, ai)
+            if updatePacket and syncedIndex then
+                Send(playerIndex, updatePacket)
             end
-        else
-            local vehicle = blam.object(get_object(player.vehicleObjectId))
-            if vehicle and core.objectIsNearTo(vehicle, ai, constants.syncDistance) then
-                local updatePacket = core.updatePacket(syncedIndex, ai)
-                if updatePacket and syncedIndex then
-                    Send(playerIndex, updatePacket)
-                end
+        end
+    else
+        local vehicle = blam.object(get_object(player.vehicleObjectId))
+        if vehicle and core.objectIsNearTo(vehicle, ai, constants.syncDistance) then
+            local updatePacket = core.updateObjectPacket(syncedIndex, ai)
+            if updatePacket and syncedIndex then
+                Send(playerIndex, updatePacket)
             end
         end
     end
+
 end
 
 ---Syncs game data required just when the game starts
@@ -161,35 +158,50 @@ local lastObjectStatePerPlayer = {}
 
 ---Syncs game data required constantly during the game
 function SyncUpdate(playerIndex)
-    for syncedIndex = 0, 509 do
-        local objectId = blam.getObjectIdBySincedIndex(syncedIndex)
+    for syncedIndex = 0, blam.getMaximumNetworkObjects() do
+        local objectId = blam.getObjectIdBySyncedIndex(syncedIndex)
         if objectId then
-            local object = blam.object(get_object(objectId))
-            -- TODO Confirm if we need to sync player bipeds state too
-            -- if object and object.class == objectClasses.biped and isNull(object.playerId) then
-            if object and object.class == objectClasses.biped then
-                local biped = blam.biped(get_object(objectId))
-                assert(biped, "Biped not found")
+            local object = blam.getObject(objectId)
+            if object and
+                (object.class == objectClasses.biped or object.class == objectClasses.vehicle) then
+                local unit = blam.unit(object.address)
+                assert(unit, "Unit cast failed")
+
                 local lastObjectState = lastObjectStatePerPlayer[playerIndex][syncedIndex] or {}
-                if core.isBipedPropertiesSynceable(biped, lastObjectState) then
-                    lastObjectState = blam.dumpObject(biped)
-                    lastObjectStatePerPlayer[playerIndex][syncedIndex] = lastObjectState
-                    Send(playerIndex, core.bipedPropertiesPacket(syncedIndex, biped))
+                if object.shaderPermutationIndex ~= lastObjectState.shaderPermutationIndex then
+                    Send(playerIndex, core.objectColorPacket(syncedIndex, object))
                 end
-                if biped.colorALowerBlue ~= lastObjectState.colorALowerBlue then
-                    Send(playerIndex, core.objectColorPacket(syncedIndex, biped))
+
+                if core.unitPropertiesShouldBeSynced(unit, lastObjectState) then
+                    lastObjectState = blam.dumpObject(unit)
+                    lastObjectStatePerPlayer[playerIndex][syncedIndex] = lastObjectState
+                    Send(playerIndex, core.unitProperties(syncedIndex, unit))
+
+                    if object.class == objectClasses.biped then
+                        local biped = blam.biped(object.address)
+                        assert(biped, "Biped cast failed")
+                        Send(playerIndex, core.bipedProperties(syncedIndex, biped))
+                    end
                 end
             end
         end
     end
 
     if player_present(playerIndex) then
-        for _, serverObjectId in pairs(core.getSyncedBipedIds()) do
-            local biped = blam.biped(get_object(serverObjectId))
-            if biped then
-                local syncedIndex = core.getSyncedIndexByObjectId(serverObjectId)
-                if core.isBipedSynceable(biped, serverObjectId) and syncedIndex then
-                    updateNetworkObject(playerIndex, biped, serverObjectId, syncedIndex)
+        -- for _, objectId in pairs(core.getSyncedBipedIds()) do
+        for syncedIndex = 0, blam.getMaximumNetworkObjects() do
+            local objectId = blam.getObjectIdBySyncedIndex(syncedIndex)
+            if objectId then
+                local object = blam.object(get_object(objectId))
+                if object then
+                    local isUnit = object.class == objectClasses.biped or object.class ==
+                                       objectClasses.vehicle
+                    local unit = blam.unit(object.address)
+                    assert(unit, "Unit cast failed")
+                    local syncedIndex = core.getSyncedIndexByObjectId(objectId)
+                    if isUnit and syncedIndex and core.isObjectSynceable(object, objectId) then
+                        updateNetworkObject(playerIndex, unit, objectId, syncedIndex)
+                    end
                 end
             end
         end
@@ -205,13 +217,13 @@ function RegisterPlayerSync(playerIndex)
     end
     local player = blam.player(get_player(playerIndex))
     if player then
-        -- Add 33ms interval (like a tick ahead of server) to avoid sync issues
+        -- Add 33ms interval (like a tick ahead of server) to avoid sync problems
         local interval = player.ping + 15
         if player.ping < constants.syncEveryMillisecs then
             interval = constants.syncEveryMillisecs + 15
         end
         if player.ping > 300 then
-            say(playerIndex, "Your ping is too high, you may experience sync issues")
+            say(playerIndex, "Your ping is too high, you may experience sync problems")
         end
         log("debug", "Player table address is " .. string.tohex(get_player(playerIndex)))
         log("debug", "Player biped id is " .. string.tohex(player.objectId))
@@ -243,10 +255,6 @@ function OnPlayerLeave(playerIndex)
         log("debug", "Removing SyncUpdate timer for player " .. playerIndex)
         return false
     end
-    -- Remove player from votes list
-    if not CoopStarted then
-        VotesList[playerIndex] = nil
-    end
 end
 
 function OnPlayerDead(deadPlayerIndex)
@@ -255,8 +263,6 @@ end
 function ResetState()
     CoopStarted = false
     VehiclesList = {}
-    mapBipedTags = {}
-    VotesList = {}
 end
 
 function OnGameEnd()
@@ -267,7 +273,7 @@ function ShowCurrentSyncedObjects(printTable)
     console_out("---------------------- SYNCED OBJECTS ----------------------")
     local syncedObjectsCount = 0
     for i = 0, 509 do
-        local objectId = blam.getObjectIdBySincedIndex(i)
+        local objectId = blam.getObjectIdBySyncedIndex(i)
         if objectId then
             syncedObjectsCount = syncedObjectsCount + 1
             if printTable then
@@ -297,16 +303,7 @@ function OnGameStart()
         set_timer(5000, "ShowCurrentSyncedObjects")
     end
     log("info", "Mimic version: " .. version)
-    CurrentScenario = blam.scenario(0)
-    -- Register available bipeds on the map
-    for tagIndex = 0, blam.tagDataHeader.count - 1 do
-        local tag = blam.getTag(tagIndex)
-        if tag and tag.class == blam.tagClasses.biped then
-            local pathSplit = tag.path:split("\\")
-            local tagFileName = pathSplit[#pathSplit]
-            mapBipedTags[tagFileName] = tag
-        end
-    end
+    currentScenario = blam.scenario(0)
 end
 
 function OnTick()
@@ -315,7 +312,6 @@ function OnTick()
     if bspIndex ~= currentBspIndex then
         currentBspIndex = bspIndex
         console_out("New bsp index detected: " .. currentBspIndex)
-        -- TODO Call find new spawn function from lua external call if possible
         Broadcast("sync_switch_bsp " .. currentBspIndex)
     end
 
@@ -327,12 +323,13 @@ function OnTick()
                 local player = blam.player(get_player(playerIndex))
                 -- Just force AI damager if the player did not damaged himself
                 if player then
-                    if playerBiped.mostRecentDamagerPlayer ~= player.objectId then
-                        -- Force server to tell this player was damaged by AI
+                    if playerBiped.mostRecentDamagerPlayer ~= player.id then
+                        -- Force server to tell this player was damaged by AI (guardians)
                         playerBiped.mostRecentDamagerPlayer = blam.null
                     end
                 end
             end
+
             -- TODO We might need to optimize this
             blam.bipedTag(playerBiped.tagId).disableCollision = true
 
@@ -349,14 +346,14 @@ function OnTick()
         end
     end
 
-    if CurrentScenario then
+    if currentScenario then
         -- Check for device machine changes
-        for objectId, group in pairs(DeviceMachinesList) do
+        for objectId, group in pairs(deviceMachinesList) do
             local device = blam.deviceMachine(get_object(objectId))
             if device then
                 -- Only sync device machines that are name based due to mimic client limitations
                 if not isNull(device.nameIndex) then
-                    local name = CurrentScenario.objectNames[device.nameIndex + 1]
+                    local name = currentScenario.objectNames[device.nameIndex + 1]
                     if name then
                         local power = blam.getDeviceGroup(device.powerGroupIndex)
                         local position = blam.getDeviceGroup(device.positionGroupIndex)
@@ -364,14 +361,14 @@ function OnTick()
                         local t = {name = name, power = power, position = position}
                         if power and power ~= group.power then
                             -- Update last power state
-                            DeviceMachinesList[objectId].power = power
+                            deviceMachinesList[objectId].power = power
 
                             local command = "sync_device_set_power {name} {power}"
                             Broadcast(command:template(t))
                         end
                         if position and position ~= group.position then
                             -- Update last position state
-                            DeviceMachinesList[objectId].position = position
+                            deviceMachinesList[objectId].position = position
 
                             local command = "sync_device_set_position {name} {position}"
                             Broadcast(command:template(t))
@@ -471,10 +468,10 @@ end
 function OnObjectSpawn(playerIndex, tagId, parentId, objectId)
     local tag = blam.getTag(tagId)
     if tag then
-        if tag.class == blam.tagClasses.vehicle then
+        if tag.class == tagClasses.vehicle then
             VehiclesList[objectId] = tagId
-        elseif tag.class == blam.tagClasses.deviceMachine then
-            DeviceMachinesList[objectId] = {power = -1, position = -1}
+        elseif tag.class == tagClasses.deviceMachine then
+            deviceMachinesList[objectId] = {power = -1, position = -1}
         end
     end
     return true
@@ -485,7 +482,7 @@ function OnScriptUnload()
     if failMessageAddress then
         -- Restore "rcon command failure" message
         safe_write(true)
-        write_byte(rcon.failMessageAddress, 0x72)
+        write_byte(failMessageAddress, 0x72)
         safe_write(false)
     end
 end

@@ -9,15 +9,16 @@ local shift = glue.shift
 local trim = glue.string.trim
 local escape = glue.string.esc
 local starts = luna.string.startswith
+local sqrt = math.sqrt
+local abs = math.abs
+local floor = math.floor
 local memoize = require "memoize"
-
-local blam = require "blam"
-local isNull = blam.isNull
-local color = require "ncolor"
-
 local strpack = string.pack
 local strunpack = string.unpack
 local concat = table.concat
+local blam = require "blam"
+local isNull = blam.isNull
+local color = require "ncolor"
 
 local hsc = require "mimic.hsc"
 
@@ -57,18 +58,6 @@ end
 local decode = memoize(decodeU)
 core.decode = decode
 
---- Get index value from an id value type
----@param id number
----@return number index
-function core.getIndexById(id)
-    local hex = glue.string.tohex(id)
-    local bytes = {}
-    for i = 5, #hex, 2 do
-        glue.append(bytes, hex:sub(i, i + 1))
-    end
-    return tonumber(concat(bytes, ""), 16)
-end
-
 --- Create an object color packet string
 ---@param syncedIndex number
 ---@param object blamObject
@@ -80,7 +69,9 @@ function core.objectColorPacket(syncedIndex, object)
         color.decToHex(object.colorAUpperRed, object.colorAUpperGreen, object.colorAUpperBlue),
         color.decToHex(object.colorBUpperRed, object.colorBUpperGreen, object.colorBUpperBlue),
         color.decToHex(object.colorCUpperRed, object.colorCUpperGreen, object.colorCUpperBlue),
-        color.decToHex(object.colorDUpperRed, object.colorDUpperGreen, object.colorDUpperBlue)
+        color.decToHex(object.colorDUpperRed, object.colorDUpperGreen, object.colorDUpperBlue),
+        object.shaderPermutationIndex
+
     }, packetSeparator)
     assert(#packet <= 64, "Packet size is too big")
     return packet
@@ -88,45 +79,51 @@ end
 
 ---Create an object update packet string
 ---@param syncedIndex number
----@param biped biped
+---@param object blamObject
 ---@return string? updatePacket
-function core.updatePacket(syncedIndex, biped)
-    if isNull(biped.vehicleObjectId) then
-        ---@type any
-        local weapon = {}
-        if not isNull(biped.firstWeaponObjectId) then
-            weapon = blam.weapon(get_object(biped.firstWeaponObjectId))
-        end
-        return concat({
-            "@u",
-            syncedIndex,
-            encode("f", biped.x),
-            encode("f", biped.y),
-            encode("f", biped.z),
-            biped.animation,
-            biped.animationFrame,
-            encode("f", biped.vX),
-            encode("f", biped.vY)
-            -- weapon.primaryTriggerState
-            -- biped.shooting and 1 or 0
-        }, packetSeparator)
-    else
-        local vehicle = blam.object(get_object(biped.vehicleObjectId))
-        if vehicle then
-            -- TODO Check if this somehow works cause it did not have a return before
-            return concat({
-                "@u",
-                syncedIndex,
-                encode("f", biped.x),
-                encode("f", biped.y),
-                encode("f", biped.z),
-                biped.animation,
-                biped.animationFrame,
-                encode("f", biped.vX),
-                encode("f", biped.vY)
-            }, packetSeparator)
-        end
+function core.updateObjectPacketNoParent(syncedIndex, object)
+    local yaw, pitch, roll = blam.getObjectRotation(object)
+    return concat({
+        "@u",
+        syncedIndex,
+        encode("f", object.x),
+        encode("f", object.y),
+        encode("f", object.z),
+        object.animation,
+        object.animationFrame,
+        encode("f", yaw),
+        encode("f", pitch),
+        encode("f", roll)
+    }, packetSeparator)
+end
+
+---Create an object update packet string
+---@param syncedIndex number
+---@param object blamObject
+---@return string? updatePacket
+function core.updateObjectPacket(syncedIndex, object)
+    local yaw, pitch, roll = blam.getObjectRotation(object)
+    local packet = {
+        "@u",
+        syncedIndex,
+        encode("f", object.x),
+        encode("f", object.y),
+        encode("f", object.z),
+        object.animation,
+        object.animationFrame,
+        encode("f", yaw),
+        encode("f", pitch),
+        encode("f", roll)
+    }
+    -- Send absolute object coordinates for vehicles until we can sync parented objects
+    local isVehicle = object.class == blam.objectClasses.vehicle
+    if isVehicle then
+        local absolute = blam.getAbsoluteObjectCoordinates(object)
+        packet[3] = encode("f", absolute.x)
+        packet[4] = encode("f", absolute.y)
+        packet[5] = encode("f", absolute.z)
     end
+    return concat(packet, packetSeparator)
 end
 
 function core.infoPacket(votesLeft, difficulty)
@@ -135,30 +132,44 @@ end
 
 --- Create a packet string to define object properties
 ---@param syncedIndex number
----@param biped biped
-function core.bipedPropertiesPacket(syncedIndex, biped)
-    local vehicleSeatIndex
-    if not isNull(biped.vehicleSeatIndex) then
-        vehicleSeatIndex = biped.vehicleSeatIndex
+---@param unit unit
+function core.unitProperties(syncedIndex, unit)
+    local parentSeatIndex
+    local parentObjectSyncedIndex = core.getSyncedIndexByObjectId(unit.parentObjectId)
+    if not isNull(unit.parentSeatIndex) then
+        parentSeatIndex = unit.parentSeatIndex
     end
     local packet = concat({
         "@o",
         syncedIndex,
         -- concat({
-        biped.regionPermutation1,
-        biped.regionPermutation2,
-        biped.regionPermutation3,
-        biped.regionPermutation4,
-        biped.regionPermutation5,
-        biped.regionPermutation6,
-        biped.regionPermutation7,
-        biped.regionPermutation8,
+        unit.regionPermutation1,
+        unit.regionPermutation2,
+        unit.regionPermutation3,
+        unit.regionPermutation4,
+        unit.regionPermutation5,
+        unit.regionPermutation6,
+        unit.regionPermutation7,
+        unit.regionPermutation8,
         -- }),
-        biped.invisible and 1 or 0,
+        unit.isCamoActive and 1 or 0,
+        parentObjectSyncedIndex or "",
+        parentSeatIndex or "",
+        unit.team
+    }, packetSeparator)
+    assert(#packet <= 64, "Packet size is too big")
+    return packet
+end
+
+--- Create a packet string to define biped properties
+---@param syncedIndex number
+---@param biped biped
+function core.bipedProperties(syncedIndex, biped)
+    local packet = concat({
+        "@b",
+        syncedIndex,
         core.getSyncedIndexByObjectId(biped.firstWeaponObjectId) or "",
         core.getSyncedIndexByObjectId(biped.secondWeaponObjectId) or "",
-        core.getSyncedIndexByObjectId(biped.vehicleObjectId) or "",
-        vehicleSeatIndex or "",
         biped.flashlight and 1 or 0
     }, packetSeparator)
     assert(#packet <= 64, "Packet size is too big")
@@ -170,68 +181,41 @@ end
 ---@param target blamObject
 ---@param sensitivity number
 function core.objectIsNearTo(biped, target, sensitivity)
-    if (target and biped) then
-        local distance = math.sqrt((target.x - biped.x) ^ 2 + (target.y - biped.y) ^ 2 +
-                                       (target.z - biped.z) ^ 2)
-        if (math.abs(distance) < sensitivity) then
+    if target and biped then
+        local distance = sqrt((target.x - biped.x) ^ 2 + (target.y - biped.y) ^ 2 +
+                                  (target.z - biped.z) ^ 2)
+        if abs(distance) < sensitivity then
             return true
         end
     end
     return false
 end
 
-function core.syncBiped(tagId, x, y, z, vX, vY, animation, animationFrame, r, g, b, invisible)
-    local objectId = spawn_object(tagId, x, y, z)
+function core.updateObject(objectId, x, y, z, yaw, pitch, roll, animation, animationFrame)
     if objectId then
-        local biped = blam.biped(get_object(objectId))
-        if biped then
-            biped.x = x
-            biped.y = y
-            biped.z = z
-            biped.vX = vX
-            biped.vY = vY
-            biped.animation = animation
-            biped.animationFrame = animationFrame
-            -- biped.zVel = 0.00001
-            biped.isNotDamageable = true
-            biped.redA = r
-            biped.greenA = g
-            biped.blueA = b
-            biped.invisible = invisible
-            return objectId
-        end
-    else
-        dprint("Error, at trying to create new sync biped.")
-    end
-    return false
-end
+        local object = blam.object(get_object(objectId))
+        -- if biped and not biped.isApparentlyDead then
+        if object then
+            local isBiped = object.class == blam.objectClasses.biped
+            local isVehicle = object.class == blam.objectClasses.vehicle
+            object.x = x
+            object.y = y
+            object.z = z
+            object.zVel = 0
+            blam.rotateObject(object, yaw, pitch, roll)
 
-function core.updateObject(objectId, x, y, z, vX, vY, animation, animationFrame, r, g, b, isShooting)
-    if objectId then
-        local biped = blam.biped(get_object(objectId))
-        if biped and not biped.isApparentlyDead then
-            biped.x = x
-            biped.y = y
-            biped.z = z
-            biped.vX = vX
-            biped.vY = vY
-            biped.animation = animation
-            biped.animationFrame = animationFrame
-            biped.zVel = 0
-            -- biped.redA = r
-            -- biped.greenA = g
-            -- biped.blueA = b
-            if isShooting and not isNull(biped.firstWeaponObjectId) then
-                local weapon = blam.weapon(get_object(biped.firstWeaponObjectId))
-                if weapon then
-                    weapon.primaryTriggerState = isShooting
-
-                end
+            if isBiped then
+                object.animation = animation
+                object.animationFrame = animationFrame
             end
+            -- if isShooting and not isNull(unit.firstWeaponObjectId) then
+            --    local weapon = blam.weapon(get_object(unit.firstWeaponObjectId))
+            --    if weapon then
+            --        weapon.primaryTriggerState = isShooting
+            --    end
+            -- end
             return true
         end
-    else
-        dprint("Error, at trying to sync biped.")
     end
     return false
 end
@@ -239,12 +223,15 @@ end
 --- "Virtualize" biped object, applies required transformations for easier network sync
 ---@param biped blamObject
 function core.virtualizeObject(biped)
-    biped.isGhost = false
-    biped.isOutSideMap = false
+    -- Do not make biped ghost if it has a parent object
+    if isNull(biped.parentObjectId) then
+        biped.isGhost = false
+    end
+    -- biped.isOutSideMap = false
     biped.isNotDamageable = true
-    biped.ignoreGravity = true
-    biped.isCollideable = true
-    biped.hasNoCollision = false
+    -- biped.isNotAffectedByGravity = true
+    -- biped.isCollideable = true
+    -- biped.hasNoCollision = false
 end
 
 --- Hide biped object from the game, apply transformations to somehow hide the specifed biped
@@ -252,7 +239,7 @@ end
 function core.hideBiped(biped)
     biped.isGhost = true
     biped.isNotDamageable = true
-    biped.ignoreGravity = true
+    biped.isNotAffectedByGravity = true
     biped.isCollideable = false
     biped.hasNoCollision = true
 end
@@ -262,7 +249,7 @@ end
 function core.revertBipedVirtualization(biped)
     biped.isGhost = false
     biped.isNotDamageable = false
-    biped.ignoreGravity = false
+    biped.isNotAffectedByGravity = false
     biped.isCollideable = true
     biped.hasNoCollision = false
 end
@@ -271,46 +258,6 @@ end
 ---@param name string
 function core.toSentenceCase(name)
     return string.gsub(" " .. name:gsub("_", " "), "%W%l", string.upper):sub(2)
-end
-
----@class vector3D
----@field x number
----@field y number
----@field z number
-
---- Covert euler into game rotation array, optional rotation matrix
--- Based on https://www.mecademic.com/en/how-is-orientation-in-space-represented-with-euler-angles
---- @param yaw number
---- @param pitch number
---- @param roll number
---- @return vector3D, vector3D, vector3D
-function core.eulerToRotation(yaw, pitch, roll)
-    local yaw = math.rad(yaw)
-    local pitch = math.rad(-pitch) -- Negative pitch due to Sapien handling anticlockwise pitch
-    local roll = math.rad(roll)
-    local matrix = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}
-
-    -- Roll, Pitch, Yaw = a, b, y
-    local cosA = math.cos(roll)
-    local sinA = math.sin(roll)
-    local cosB = math.cos(pitch)
-    local sinB = math.sin(pitch)
-    local cosY = math.cos(yaw)
-    local sinY = math.sin(yaw)
-
-    matrix[1][1] = cosB * cosY
-    matrix[1][2] = -cosB * sinY
-    matrix[1][3] = sinB
-    matrix[2][1] = cosA * sinY + sinA * sinB * cosY
-    matrix[2][2] = cosA * cosY - sinA * sinB * sinY
-    matrix[2][3] = -sinA * cosB
-    matrix[3][1] = sinA * sinY - cosA * sinB * cosY
-    matrix[3][2] = sinA * cosY + cosA * sinB * sinY
-    matrix[3][3] = cosA * cosB
-
-    local rollVector = {x = matrix[1][1], y = matrix[2][1], z = matrix[3][1]}
-    local yawVector = {x = matrix[1][3], y = matrix[2][3], z = matrix[3][3]}
-    return rollVector, yawVector, matrix
 end
 
 ---Parse and strip any hsc command into individual parts
@@ -444,43 +391,13 @@ end
 ---@return number?
 function core.getSyncedIndexByObjectId(localObjectId)
     for index = 0, 509 do
-        local objectId = blam.getObjectIdBySincedIndex(index)
+        local objectId = blam.getObjectIdBySyncedIndex(index)
         if objectId and objectId == localObjectId then
             return index
         end
     end
     return nil
 end
-
-function core.dispatchAISpawn(upcomingAiSpawn)
-    for objectId, tagId in pairs(upcomingAiSpawn) do
-        local ai = blam.biped(get_object(objectId))
-        if ai and not ai.isApparentlyDead then
-            local syncedIndex = core.getSyncedIndexByObjectId(objectId)
-            assert(syncedIndex, "Failed to get synced index for object with id: " .. objectId)
-            if isNull(ai.nameIndex) then
-                -- Broadcast(core.positionPacket(objectId, ai))
-                Broadcast(core.positionPacket(syncedIndex, ai))
-                upcomingAiSpawn[objectId] = nil
-            else
-                local bipedName = CurrentScenario.objectNames[ai.nameIndex + 1]
-                if (bipedName and bipedName == "captain_keyes" or bipedName == "free_marine_1" or
-                    bipedName == "free_marine_2" or bipedName == "free_marine_3") then
-                    -- Broadcast(core.positionPacket(objectId, ai))
-                    Broadcast(core.positionPacket(syncedIndex, ai))
-                    upcomingAiSpawn[objectId] = nil
-                    console_out("Biped " .. bipedName ..
-                                    " is an exception that will be synced as AI")
-                end
-            end
-        end
-    end
-    return upcomingAiSpawn
-end
-
-local sqrt = math.sqrt
-local abs = math.abs
-local floor = math.floor
 
 --- Check if player is looking at object main frame
 ---@param mainObject? number
@@ -534,11 +451,12 @@ end
 function core.getSyncedBipedIds()
     local syncedBipedIds = {}
     for index = 0, 509 do
-        local objectId = blam.getObjectIdBySincedIndex(index)
+        local objectId = blam.getObjectIdBySyncedIndex(index)
         if objectId then
             local object = blam.object(get_object(objectId))
             if object and object.class == blam.objectClasses.biped then
-                table.insert(syncedBipedIds, objectId)
+                -- table.insert(syncedBipedIds, objectId)
+                syncedBipedIds[index] = objectId
             end
         end
     end
@@ -550,7 +468,7 @@ end
 function core.getSyncedObjectsIds()
     local syncedObjectsIds = {}
     for index = 0, 509 do
-        local objectId = blam.getObjectIdBySincedIndex(index)
+        local objectId = blam.getObjectIdBySyncedIndex(index)
         if objectId then
             local object = blam.object(get_object(objectId))
             if object then
@@ -562,12 +480,16 @@ function core.getSyncedObjectsIds()
 end
 
 ---Validate if a biped is syncable
----@param biped biped
+---@param object blamObject
 ---@param objectId number
-function core.isBipedSynceable(biped, objectId)
+function core.isObjectSynceable(object, objectId)
     -- Filter server bipeds that are already synced
     for playerIndex = 1, 16 do
         local playerObjectAdress = get_dynamic_player(playerIndex)
+        local unit = blam.unit(playerObjectAdress)
+        if unit and unit.parentObjectId == objectId then
+            return false
+        end
         local aiObjectAddress = get_object(objectId)
         -- AI is the same as the player, do not sync
         if playerObjectAdress == aiObjectAddress then
@@ -575,13 +497,16 @@ function core.isBipedSynceable(biped, objectId)
         end
     end
     -- Only sync ai inside the same bsp as the players
-    if not biped.isOutSideMap and isNull(biped.nameIndex) then
-        return true
+    if object.isOutSideMap then
+        return false
     end
-    return false
+    if isNull(object.nameIndex) then
+        -- return false
+    end
+    return true
 end
 
-local synceableProperties = {
+local synceableObjectProperties = {
     "regionPermutation1",
     "regionPermutation2",
     "regionPermutation3",
@@ -590,16 +515,36 @@ local synceableProperties = {
     "regionPermutation6",
     "regionPermutation7",
     "regionPermutation8",
-    "invisible",
+    "parentObjectId",
+    "parentSeatIndex"
+}
+
+--- Check if unit should be synced
+---@param unit unit
+---@param lastObjectProperties table
+---@return boolean
+function core.unitPropertiesShouldBeSynced(unit, lastObjectProperties)
+    for _, property in pairs(synceableObjectProperties) do
+        if unit[property] ~= lastObjectProperties[property] then
+            return true
+        end
+    end
+    return false
+end
+
+local synceableBipedProperties = {
+    "isCamoActive",
     "firstWeaponObjectId",
     "secondWeaponObjectId",
-    "vehicleObjectId",
-    "vehicleSeatIndex",
     "flashlight"
 }
 
-function core.isBipedPropertiesSynceable(biped, lastBipedProperties)
-    for _, property in pairs(synceableProperties) do
+--- Check if biped should be synced
+---@param biped biped
+---@param lastBipedProperties table
+---@return boolean
+function core.bipedShouldBeSynced(biped, lastBipedProperties)
+    for _, property in pairs(synceableBipedProperties) do
         if biped[property] ~= lastBipedProperties[property] then
             return true
         end
