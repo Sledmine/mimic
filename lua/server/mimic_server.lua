@@ -33,7 +33,7 @@ local constants = require "mimic.constants"
 local version = require "mimic.version"
 
 -- Settings
-DebugMode = true
+DebugMode = false
 local bspIndexAddress = 0x40002CD8
 local passwordAddress
 local failMessageAddress
