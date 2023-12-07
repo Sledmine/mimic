@@ -58,7 +58,7 @@ end
 
 function Broadcast(message)
     for playerIndex = 1, 16 do
-        if (player_present(playerIndex)) then
+        if player_present(playerIndex) then
             rprint(playerIndex, message)
         end
     end
@@ -75,7 +75,7 @@ function SyncHSC(_, hscMimicCommand)
         LastSyncCommand = hscMimicCommand
         local syncCommand = core.adaptHSC(hscMimicCommand)
         if syncCommand then
-            console_out("Syncing: " .. syncCommand)
+            log("debug", "Sync command: " .. syncCommand)
             Broadcast(syncCommand)
         end
         -- Uncommenting this probably will be required for very specific hsc specific script cases
@@ -246,6 +246,7 @@ function OnPlayerJoin(playerIndex)
     -- Sync game state
     set_timer(constants.startSyncingAfterMillisecs, "SyncGameState", playerIndex)
 
+    -- Setup player sync update
     set_timer(constants.startSyncingAfterMillisecs, "RegisterPlayerSync", playerIndex)
 end
 
@@ -311,7 +312,7 @@ function OnTick()
     local bspIndex = read_byte(bspIndexAddress)
     if bspIndex ~= currentBspIndex then
         currentBspIndex = bspIndex
-        console_out("New bsp index detected: " .. currentBspIndex)
+        log("debug", "New bsp index detected: " .. currentBspIndex)
         Broadcast("sync_switch_bsp " .. currentBspIndex)
     end
 
