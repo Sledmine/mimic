@@ -51,6 +51,9 @@ local currentScenario = nil
 ---Log to console
 ---@param type "info" | "error" | "warning" | "debug"
 local function log(type, message)
+    if not DebugMode and type == "debug" then
+        return
+    end
     -- Use ASCII color codes for console output
     local color = {info = 2, error = 4, warning = 6, debug = 3}
     console_out("[" .. type:upper() .. "] " .. message, color[type])
