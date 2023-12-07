@@ -17,8 +17,7 @@
         },
         {
             "label": "balltze",
-            "version": "1.0.0",
-            "forced": true
+            "version": "1.0.0"
         }
     ]
 }
