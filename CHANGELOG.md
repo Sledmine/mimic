@@ -4,6 +4,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.3] - 2023-12-06
+### Fixed
+- Performance drop when syncing bipeds that are not inside current bsp in client side
+
+### Changed
+- New command `mimic_collision` to enable or disable biped collision (for testing purposes only)
+- Lua function `tonumber` is now memoized in client for better performance (experimental)
+
+## [3.0.2] - 2023-12-06
+### Fixed
+- Unnecessary debug messages being printed regardless of debug mode
+
+## [3.0.1] - 2023-12-06
+### Fixed
+- Debug mode was not disabled by default
+
+## [3.0.0] - 2023-12-03
+### Changed
+- Sync messages use a different identifier for better classification (breaking change)
+- AI and units in general can now enter other vehicles
+- Support for syncing biped weapons (raw implementation)
+- Unit properties such as color, invisibility, permutations and more are now synced
+- Support to sync vehicles that are driven by AI (raw implementation)
+
+### Fixed
+- Sync performance has been improved by a lot
+- Memory leak that will reduce performance as AI bipeds appear
+
 ## [2.1.5] - 2022-09-28
 ### Added
 - Mimic version printing on the server script
