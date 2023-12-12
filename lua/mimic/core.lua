@@ -194,28 +194,37 @@ end
 function core.updateObject(objectId, x, y, z, yaw, pitch, roll, animation, animationFrame)
     if objectId then
         local object = blam.object(get_object(objectId))
-        -- if biped and not biped.isApparentlyDead then
-        if object then
-            local isBiped = object.class == blam.objectClasses.biped
-            local isVehicle = object.class == blam.objectClasses.vehicle
-            object.x = x
-            object.y = y
-            object.z = z
-            object.zVel = 0
-            blam.rotateObject(object, yaw, pitch, roll)
-
-            if isBiped then
-                object.animation = animation
-                object.animationFrame = animationFrame
-            end
-            -- if isShooting and not isNull(unit.firstWeaponObjectId) then
-            --    local weapon = blam.weapon(get_object(unit.firstWeaponObjectId))
-            --    if weapon then
-            --        weapon.primaryTriggerState = isShooting
-            --    end
-            -- end
-            return true
+        -- NOTES:
+        -- 1. Apparently dead bipeds might not have to be updated
+        -- 2. Objects outside the map lag the game when updated for some reason
+        if not object then
+            return false
         end
+        if object.isOutSideMap then
+            return false
+        end
+        if object.isApparentlyDead then
+            return false
+        end
+        local isBiped = object.class == blam.objectClasses.biped
+        local isVehicle = object.class == blam.objectClasses.vehicle
+        object.x = x
+        object.y = y
+        object.z = z
+        object.zVel = 0
+        blam.rotateObject(object, yaw, pitch, roll)
+
+        if isBiped then
+            object.animation = animation
+            object.animationFrame = animationFrame
+        end
+        -- if isShooting and not isNull(unit.firstWeaponObjectId) then
+        --    local weapon = blam.weapon(get_object(unit.firstWeaponObjectId))
+        --    if weapon then
+        --        weapon.primaryTriggerState = isShooting
+        --    end
+        -- end
+        return true
     end
     return false
 end
@@ -285,7 +294,7 @@ end
 ---@return string?
 function core.adaptHSC(hscCommand)
     -- Check if the map is trying to get a player on a vehicle
-    if (starts(hscCommand, "sync_unit_enter_vehicle") and hscCommand:find("player")) then
+    if starts(hscCommand, "sync_unit_enter_vehicle") and hscCommand:find("player") then
         local params = core.parseHSC(hscCommand)
         local unitName = params[2]
         local begin, last = unitName:find("player")
@@ -294,14 +303,13 @@ function core.adaptHSC(hscCommand)
         local seatIndex = tonumber(params[4], 10)
         for vehicleObjectId, vehicleTagId in pairs(VehiclesList) do
             local vehicle = blam.object(get_object(vehicleObjectId))
-            if (vehicle and not isNull(vehicle.nameIndex)) then
+            if vehicle and not isNull(vehicle.nameIndex) then
                 local scenario = blam.scenario(0)
                 local objectScenarioName = scenario.objectNames[vehicle.nameIndex + 1]
-                if (objectName == objectScenarioName) then
-                    if (player_present(playerIndex)) then
-                        console_out(playerIndex)
-                        console_out(objectName)
-                        console_out(seatIndex)
+                if objectName == objectScenarioName then
+                    if player_present(playerIndex) then
+                        console_debug("Player " .. playerIndex .. " will enter vehicle " ..
+                                          vehicleObjectId .. " on seat " .. seatIndex)
                         enter_vehicle(vehicleObjectId, playerIndex, seatIndex)
                     end
                 end
@@ -359,7 +367,7 @@ function core.adaptHSC(hscCommand)
             -- Check if command has parameters
             if starts(hscCommand, "sync_" .. actionName .. " ") then
                 -- Escape spaces and quotes
-                console_out("Raw command: " .. hscCommand)
+                console_debug("Raw command: " .. hscCommand)
 
                 local params = core.parseHSC(hscCommand)
                 params = shift(params, 1, -1)
@@ -370,8 +378,8 @@ function core.adaptHSC(hscCommand)
                 -- Transform parameters into blam terms, IDs, indexes, etc
                 for parameterIndex, parameter in pairs(action.parameters) do
                     local argumentValue = params[parameterIndex]
-                    if (argumentValue) then
-                        if (parameter.value and parameter.class) then
+                    if argumentValue then
+                        if parameter.value and parameter.class then
                             argumentValue = tostring(blam.getTag(argumentValue, parameter.class).id)
                         end
                         append(syncPacketData, argumentValue)

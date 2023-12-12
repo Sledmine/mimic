@@ -21,6 +21,8 @@ local concat = table.concat
 local constants = require "mimic.constants"
 local inspect = require "inspect"
 local isBalltzeAvailable, balltze = pcall(require, "mods.balltze")
+local memoize = require "memoize"
+local tonumber = memoize(tonumber)
 
 -- Script settings variables (do not modify them manually)
 DebugMode = false
@@ -94,7 +96,7 @@ local function processPacket(message, packetType, packet)
     if not enableSync then
         enableSync = true
     end
-    local currentTime = os.time()
+    -- local currentTime = os.time()
     if DebugMode then
         packetCount = packetCount + 1
         if DebugLevel >= 2 then
@@ -261,7 +263,8 @@ local function processPacket(message, packetType, packet)
                 local parentObjectId = blam.getObjectIdBySyncedIndex(parentObjectSyncedIndex)
                 if parentObjectId then
                     if not isBalltzeAvailable then
-                        console_out("Balltze is not available, unit vehicle entering is not supported")
+                        console_out(
+                            "Balltze is not available, unit vehicle entering is not supported")
                         return
                     end
                     balltze.unit_enter_vehicle(objectId, parentObjectId, parentSeatIndex)
@@ -415,11 +418,7 @@ function OnPacket(message)
     -- This is a packet sent from the server script for
     if packet and packet[1]:includes("@") then
         local packetType = packet[1]
-        if asyncMode then
-            table.insert(queuePackets, {message, packetType, packet})
-        else
-            processPacket(message, packetType, packet)
-        end
+        processPacket(message, packetType, packet)
         return false
     elseif message:includes("sync_") then
         local data = message:split "sync_"
@@ -455,13 +454,14 @@ function OnCommand(command)
         local params = command:split " "
         if #params > 1 and params[2] then
             DebugLevel = tonumber(params[2])
+            console_out("Debug level: " .. DebugLevel)
         end
         DebugMode = not DebugMode
         console_out("Debug mode: " .. tostring(DebugMode))
         return false
-    elseif command == "mimic_async" then
-        asyncMode = not asyncMode
-        console_out("Async mode: " .. tostring(asyncMode))
+    elseif command == "mimic_collision" then
+        disablePlayerCollision = not disablePlayerCollision
+        console_out("Biped collision: " .. tostring(not disablePlayerCollision))
         return false
     elseif command == "mimic_version" then
         console_out(scriptVersion)
