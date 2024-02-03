@@ -37,6 +37,7 @@ DebugMode = false
 local bspIndexAddress = 0x40002CD8
 local passwordAddress
 local failMessageAddress
+local allowClientSideWeaponProjectilesAddress
 local serverRcon
 
 -- State
@@ -57,6 +58,16 @@ local function log(type, message)
     -- Use ASCII color codes for console output
     local color = {info = 2, error = 4, warning = 6, debug = 3}
     console_out("[" .. type:upper() .. "] " .. message, color[type])
+end
+
+---Enable or disable server side projectiles synchronization
+---@param enable boolean
+local function serverSideProjectiles(enable)
+    -- TODO Move this function to core module
+    if not allowClientSideWeaponProjectilesAddress then
+        log("error", "Error no address found for client side weapon projectiles")
+    end
+    write_byte(allowClientSideWeaponProjectilesAddress, enable and 0x0 or 0x1)
 end
 
 function Broadcast(message)
@@ -308,6 +319,13 @@ function OnGameStart()
     end
     log("info", "Mimic version: " .. version)
     currentScenario = blam.scenario(0)
+    assert(currentScenario, "No current scenario tag found")
+    if currentScenario.encounterPaletteCount > 0 then
+        log("warning", "Scenario has AI encounters, enabling projectiles sync")
+        serverSideProjectiles(true)
+    else
+        serverSideProjectiles(false)
+    end
 end
 
 function OnTick()
@@ -427,6 +445,7 @@ end
 function OnScriptLoad()
     passwordAddress = read_dword(sig_scan("7740BA??????008D9B000000008A01") + 0x3)
     failMessageAddress = read_dword(sig_scan("B8????????E8??000000A1????????55") + 0x1)
+    allowClientSideWeaponProjectilesAddress = read_dword(sig_scan("803D????????01741533C0EB") + 0x2)
     if passwordAddress and failMessageAddress then
         -- Remove "rcon command failure" message
         safe_write(true)
@@ -447,8 +466,6 @@ function OnScriptLoad()
     harmonySapp.set_hs_globals_set_callback(function()
         execute_command("inspect sync_hsc_command", 0, true)
     end)
-    -- Netcode does not sync AI projectiles, force it with this
-    -- execute_script("allow_client_side_weapon_projectiles 0")
 
     -- Set server callback
     register_callback(cb["EVENT_GAME_START"], "OnGameStart")
