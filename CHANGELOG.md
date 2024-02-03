@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.4] - 20234-02-02
+### Fixed
+- Server side projectiles being always synced to the client, now sync will be toggled on if any AI encounter is detected in the scenario
+
 ## [3.0.3] - 2023-12-06
 ### Fixed
 - Performance drop when syncing bipeds that are not inside current bsp in client side
