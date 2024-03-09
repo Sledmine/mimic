@@ -353,15 +353,6 @@ function core.adaptHSC(hscCommand)
             Broadcast(hscCommand:gsub("player0", "player" .. playerIndex))
         end
         return
-    elseif starts(hscCommand, "sync_camera_control") then
-        -- TODO Add cinematic_start and cinematic_stop for accurate cinematic determination
-        local params = split(hscCommand, " ")
-        IsGameOnCinematic = params[2] == "true"
-        if (IsGameOnCinematic) then
-            say_all("Warning, game is on cinematic!")
-        else
-            say_all("Done, cinematic has ended!")
-        end
     else
         for actionName, action in pairs(hsc) do
             -- Check if command has parameters
@@ -558,6 +549,21 @@ function core.bipedShouldBeSynced(biped, lastBipedProperties)
         end
     end
     return false
+end
+
+local setDisconnectedFlagAddress = 0x004cbbb0 + 0x1
+local stockTimeout = 15000
+local expandedTimeout = 45000
+function core.patchPlayerConnectionTimeout(revert)
+    safe_write(true)
+    -- Increase player connection timeout
+    if revert then
+        write_word(setDisconnectedFlagAddress, stockTimeout)
+        safe_write(false)
+        return
+    end
+    write_word(setDisconnectedFlagAddress, expandedTimeout)
+    safe_write(false)
 end
 
 return core

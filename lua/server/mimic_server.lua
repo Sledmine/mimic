@@ -43,8 +43,6 @@ local serverRcon
 -- State
 VehiclesList = {} -- Global cause we need to access it from core module
 local deviceMachinesList = {}
-IsGameOnCinematic = false
-CoopStarted = false
 LastSyncCommand = ""
 local currentBspIndex
 local currentScenario = nil
@@ -116,12 +114,12 @@ function SyncGameState(playerIndex)
     end
 end
 
---- Syncs all bipeds in the map
+--- Sync network object to player
 ---@param playerIndex number
----@param ai unit
+---@param unit unit
 ---@param serverObjectId number
 ---@param syncedIndex number
-local function updateNetworkObject(playerIndex, ai, serverObjectId, syncedIndex)
+local function updateNetworkObject(playerIndex, unit, serverObjectId, syncedIndex)
     local player = blam.biped(get_dynamic_player(playerIndex))
     if not player then
         return
@@ -134,19 +132,19 @@ local function updateNetworkObject(playerIndex, ai, serverObjectId, syncedIndex)
     -- end
     -- Sync AI biped if it is near to the player
     if isNull(player.vehicleObjectId) then
-        if (core.objectIsNearTo(player, ai, constants.syncDistance) and
+        if (core.objectIsNearTo(player, unit, constants.syncDistance) and
             core.objectIsLookingAt(get_dynamic_player(playerIndex) --[[@as number]] ,
                                    serverObjectId, constants.syncBoundingRadius, 0,
                                    constants.syncDistance)) then
-            local updatePacket = core.updateObjectPacket(syncedIndex, ai)
+            local updatePacket = core.updateObjectPacket(syncedIndex, unit)
             if updatePacket and syncedIndex then
                 Send(playerIndex, updatePacket)
             end
         end
     else
         local vehicle = blam.object(get_object(player.vehicleObjectId))
-        if vehicle and core.objectIsNearTo(vehicle, ai, constants.syncDistance) then
-            local updatePacket = core.updateObjectPacket(syncedIndex, ai)
+        if vehicle and core.objectIsNearTo(vehicle, unit, constants.syncDistance) then
+            local updatePacket = core.updateObjectPacket(syncedIndex, unit)
             if updatePacket and syncedIndex then
                 Send(playerIndex, updatePacket)
             end
@@ -251,9 +249,6 @@ function RegisterPlayerSync(playerIndex)
 end
 
 function OnPlayerJoin(playerIndex)
-    -- Set players on the same team for coop purposes
-    execute_script("st " .. playerIndex .. " red")
-
     -- Sync game data just required when the game starts
     set_timer(constants.startSyncingAfterMillisecs, "SyncGameStart", playerIndex)
 
@@ -276,7 +271,6 @@ function OnPlayerDead(deadPlayerIndex)
 end
 
 function ResetState()
-    CoopStarted = false
     VehiclesList = {}
 end
 
@@ -355,8 +349,13 @@ function OnTick()
             -- TODO We might need to optimize this
             blam.bipedTag(playerBiped.tagId).disableCollision = true
 
+            -- We might need to turn this into a feature or something cause it affects maps
+            -- that have phantom BSPs causing the player to be out side of the map for a fraction
+            -- of time
+            -- TODO Add a way to load these features from a file or something
             if playerBiped.isOutSideMap then
-                if not IsGameOnCinematic and player then
+                local cinematic = blam.cinematicGlobals()
+                if not cinematic.isInProgress and player then
                     -- Respawn players stuck outside current game bsp/map
                     -- TODO Add a way to respawn player inside a vehicle by force
                     -- Deleting vehicle object does not work, you can not delete it for some reason
@@ -443,6 +442,7 @@ function OnCommand(playerIndex, command, environment, rconPassword)
 end
 
 function OnScriptLoad()
+    core.patchPlayerConnectionTimeout()
     passwordAddress = read_dword(sig_scan("7740BA??????008D9B000000008A01") + 0x3)
     failMessageAddress = read_dword(sig_scan("B8????????E8??000000A1????????55") + 0x1)
     allowClientSideWeaponProjectilesAddress = read_dword(sig_scan("803D????????01741533C0EB") + 0x2)
