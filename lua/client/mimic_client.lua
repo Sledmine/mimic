@@ -353,18 +353,6 @@ function OnTick()
     if not gameStarted then
         onGameStart()
     end
-    if enableSync and gameStarted then
-        -- Constantly erase locally created AI bipeds
-        execute_script("ai_erase_all")
-    end
-    if lastMapName ~= map then
-        lastMapName = map
-        if lastMapName == "ui" then
-            disablePlayerCollision = false
-            dprint("Restoring client side projectiles...")
-            execute_script("allow_client_side_weapon_projectiles 1")
-        end
-    end
     -- Start removing the server created bipeds only when the server aks for it
     if blam.isGameDedicated() then
         if disablePlayerCollision then
@@ -373,39 +361,51 @@ function OnTick()
                 blam.bipedTag(biped.tagId).disableCollision = true
             end
         end
-    end
-    if DebugMode then
-        if get_player() then
-            local currentTime = os.time()
-            if (currentTime - timeSinceLastPacket) >= 1 then
-                timeSinceLastPacket = currentTime
-                packetsPerSecond = packetCount
-                packetCount = 0
-            end
-            nearestAIDetails = ""
-            for syncedIndex, objectId in pairs(core.getSyncedBipedIds()) do
-                local biped = blam.biped(get_object(objectId))
-                if biped and core.objectIsLookingAt(get_dynamic_player(), objectId, 0.5, 0, 10) then
-                    local tag = blam.getTag(biped.tagId)
-                    assert(tag, "Error, tag not found")
-                    nearestAIDetails = ("%s -> serverId: %s -> localId: %s"):format(tag.path,
-                                                                                    syncedIndex,
-                                                                                    objectId)
+        if enableSync and gameStarted then
+            -- Constantly erase locally created AI bipeds
+            execute_script("ai_erase_all")
+        end
+        if DebugMode then
+            if get_player() then
+                local currentTime = os.time()
+                if (currentTime - timeSinceLastPacket) >= 1 then
+                    timeSinceLastPacket = currentTime
+                    packetsPerSecond = packetCount
+                    packetCount = 0
+                end
+                nearestAIDetails = ""
+                for syncedIndex, objectId in pairs(core.getSyncedBipedIds()) do
+                    local biped = blam.biped(get_object(objectId))
+                    if biped and core.objectIsLookingAt(get_dynamic_player(), objectId, 0.5, 0, 10) then
+                        local tag = blam.getTag(biped.tagId)
+                        assert(tag, "Error, tag not found")
+                        nearestAIDetails = ("%s -> serverId: %s -> localId: %s"):format(tag.path,
+                                                                                        syncedIndex,
+                                                                                        objectId)
+                    end
                 end
             end
         end
-    end
-    for objectId, parentObjectId in pairs(virtualParentedObjects) do
-        local object = blam.object(get_object(objectId))
-        if object then
-            local parentObject = blam.object(get_object(parentObjectId))
-            if parentObject then
-                object.x = parentObject.x + object.x
-                object.y = parentObject.y + object.y
-                object.z = parentObject.z + object.z
+        for objectId, parentObjectId in pairs(virtualParentedObjects) do
+            local object = blam.object(get_object(objectId))
+            if object then
+                local parentObject = blam.object(get_object(parentObjectId))
+                if parentObject then
+                    object.x = parentObject.x + object.x
+                    object.y = parentObject.y + object.y
+                    object.z = parentObject.z + object.z
+                end
+            else
+                virtualParentedObjects[objectId] = nil
             end
-        else
-            virtualParentedObjects[objectId] = nil
+        end
+    end
+    if lastMapName ~= map then
+        lastMapName = map
+        if lastMapName == "ui" then
+            disablePlayerCollision = false
+            dprint("Restoring client side projectiles...")
+            execute_script("allow_client_side_weapon_projectiles 1")
         end
     end
 end
