@@ -2,7 +2,7 @@
     "manifestVersion": "1.1.0",
     "files": {},
     "label": "mimic",
-    "version": "3.0.5",
+    "version": "3.0.6",
     "category": "script",
     "author": "Sledmine",
     "name": "Mimic",
@@ -17,8 +17,7 @@
         },
         {
             "label": "balltze",
-            "version": "1.1.0",
-            "forced": true
+            "version": "1.1.1"
         }
     ]
 }
