@@ -135,6 +135,11 @@ function core.unitProperties(syncedIndex, unit)
     if not isNull(unit.parentSeatIndex) then
         parentSeatIndex = unit.parentSeatIndex
     end
+    local isVehicle = unit.class == blam.objectClasses.vehicle
+    if isVehicle then
+        parentSeatIndex = nil
+        parentObjectSyncedIndex = nil
+    end
     local packet = concat({
         "@o",
         syncedIndex,
