@@ -4,7 +4,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [3.0.4] - 20234-02-02
+## [3.0.6] - 2024-06-18
+### Fixed
+- Most recent damager player value being modified following an old coop evolved logic
+- Server side sending information to sync vehicles entering other vehicles (will be properly fixed later)
+
+## [3.0.5] - 2024-03-15
+### Fixed
+- Dedicated server logic being executed in single player mode
+- Revert experimental network timeout patch (now fixed with Balltze)
+
+### Changed
+- Improved game cinematic detection
+
+## [3.0.4] - 2024-02-02
 ### Fixed
 - Server side projectiles being always synced to the client, now sync will be toggled on if any AI encounter is detected in the scenario
 
