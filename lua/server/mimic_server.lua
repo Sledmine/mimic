@@ -335,16 +335,6 @@ function OnTick()
         local playerBiped = blam.biped(get_dynamic_player(playerIndex))
         if playerBiped then
             local player = blam.player(get_player(playerIndex))
-            if not isNull(playerBiped.mostRecentDamagerPlayer) then
-                local player = blam.player(get_player(playerIndex))
-                -- Just force AI damager if the player did not damaged himself
-                if player then
-                    if playerBiped.mostRecentDamagerPlayer ~= player.id then
-                        -- Force server to tell this player was damaged by AI (guardians)
-                        playerBiped.mostRecentDamagerPlayer = blam.null
-                    end
-                end
-            end
 
             -- TODO We might need to optimize this
             blam.bipedTag(playerBiped.tagId).disableCollision = true
