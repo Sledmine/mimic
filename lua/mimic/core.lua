@@ -126,10 +126,6 @@ function core.updateObjectPacket(syncedIndex, object)
     return concat(packet, packetSeparator)
 end
 
-function core.infoPacket(votesLeft, difficulty)
-    return concat({"@i", votesLeft, difficulty}, packetSeparator)
-end
-
 --- Create a packet string to define object properties
 ---@param syncedIndex number
 ---@param unit unit
