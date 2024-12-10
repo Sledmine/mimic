@@ -1,0 +1,13 @@
+{
+    "name": "Mimic Server",
+    "target": "lua53",
+    "include": [
+        "lua",
+        "lua/modules"
+    ],
+    "modules": [
+        "struct"
+    ],
+    "main": "server/mimic_server",
+    "output": "dist/mimic_server.lua"
+}

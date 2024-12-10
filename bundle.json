@@ -2,20 +2,10 @@
     "name": "Mimic",
     "target": "lua53",
     "include": [
-        "lua/"
+        "lua",
+        "lua/modules"
     ],
-    "modules": [
-        "blam",
-        "glue",
-        "inspect",
-        "memoize",
-        "luna",
-        "mimic.core",
-        "mimic.hsc",
-        "mimic.constants",
-        "mimic.version",
-        "ncolor"
-    ],
-    "main":"client/mimic_client",
-    "output": "dist/mimic_client.lua"
+    "modules": [],
+    "main":"mimic",
+    "output": "dist/mimic.lua"
 }
