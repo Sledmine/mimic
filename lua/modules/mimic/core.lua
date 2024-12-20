@@ -209,6 +209,7 @@ function core.updateObject(objectId, x, y, z, yaw, pitch, roll, animation, anima
         end
         local isBiped = object.class == blam.objectClasses.biped
         local isVehicle = object.class == blam.objectClasses.vehicle
+
         object.x = x
         object.y = y
         object.z = z
@@ -242,16 +243,6 @@ function core.virtualizeObject(biped)
     -- biped.isNotAffectedByGravity = true
     -- biped.isCollideable = true
     -- biped.hasNoCollision = false
-end
-
---- Hide biped object from the game, apply transformations to somehow hide the specifed biped
----@param biped blamObject
-function core.hideBiped(biped)
-    biped.isGhost = true
-    biped.isNotDamageable = true
-    biped.isNotAffectedByGravity = true
-    biped.isCollideable = false
-    biped.hasNoCollision = true
 end
 
 --- Revert virtualization transformations
