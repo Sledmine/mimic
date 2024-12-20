@@ -50,7 +50,7 @@ local main
 
 function PluginLoad()
     logger = balltze.logger.createLogger("Mimic")
-    logger:muteDebug(DebugMode)
+    logger:muteDebug(not DebugMode)
 
     balltze.event.mapLoad.subscribe(function(event)
         if event.time == "before" then
