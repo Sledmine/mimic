@@ -109,6 +109,9 @@ local function processPacket(message, packetType, packet)
     end
     if packetType:startswith "@" then
         if packetType == "@c" then
+            if DebugLevel >= 2 then
+                logger:debug("Received color packet: {}", message)
+            end
             local syncedIndex = tonumber(packet[2])
             assert(syncedIndex, "Error, synced index is not valid")
 
@@ -192,6 +195,9 @@ local function processPacket(message, packetType, packet)
                 end
             end
         elseif packetType == "@o" then
+            if DebugLevel >= 2 then
+                logger:debug("Received object packet: {}", message)
+            end
             local syncedIndex = tonumber(packet[2])
             assert(syncedIndex, "Error, synced index is not valid")
 
@@ -448,7 +454,7 @@ function OnUnload()
 end
 
 function OnPreFrame()
-    if DebugMode and (blam.isGameDedicated() or blam.isGameHost()) then
+    if DebugMode then
         draw_text(nearestAIDetails, bounds.left, bounds.top, bounds.right, bounds.bottom, font,
                   align, table.unpack(textColor))
 
