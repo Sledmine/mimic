@@ -1,17 +1,15 @@
 version: 1
 commands:
   package:
-    - rm -rf dist
-    - mkdir -p dist
+    - rm -f dist/*.lua
     - mercury luabundle
     - mercury luabundle server
-    - cp -f dist/mimic_client.lua package/lua-global
     - cp -f dist/mimic_server.lua package/lua-sapp
+    - cp -f dist/mimic.lua package/balltze-plugins/mimic.lua
     - mercury pack package/ dist/
-    - rm -f package/lua-global/mimic_client.lua
+    - rm -f package/balltze-plugins/mimic.lua
     - rm -f package/lua-sapp/mimic_server.lua
   symlinks:
-    - ln -f -s "$PWD/dist/mimic_client.lua" "$HALO_CE_DATA_PATH/chimera/lua/scripts/global/mimic_client.lua"
     - ln -f -s "$PWD/dist/mimic_server.lua" "$HALO_CE_DATA_PATH/sapp/lua/mimic_server.lua"
   release:
     - mercury build package

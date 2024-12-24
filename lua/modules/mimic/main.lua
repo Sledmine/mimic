@@ -13,23 +13,16 @@ local core = require "mimic.core"
 local hsc = require "mimic.hsc"
 package.preload["luna"] = nil
 package.loaded["luna"] = nil
-local luna = require "luna"
-local split = luna.string.split
+require "luna"
 local append = table.insert
-local starts = luna.string.startswith
 local color = require "ncolor"
 local concat = table.concat
-local constants = require "mimic.constants"
-local inspect = require "inspect"
-local isBalltzeAvailable, balltze = pcall(require, "mods.balltze")
 local memoize = require "memoize"
 local tonumber = memoize(tonumber)
 local balltze = Balltze
 local engine = Engine
 
 -- Script settings variables
-DebugMode = false
-DebugLevel = 1
 DisablePlayerCollision = false
 local lastMapName
 local enableSync = false
@@ -44,8 +37,6 @@ local textColor = {1.0, 0.45, 0.72, 1.0}
 local packetCount = 0
 local packetsPerSecond = 0
 local timeSinceLastPacket = 0
-
---logger:muteDebug(not DebugMode)
 
 -- State
 local queuePackets = {}
@@ -182,7 +173,8 @@ local function processPacket(message, packetType, packet)
                     if object then
                         if object.isOutSideMap then
                             if DebugMode and DebugLevel >= 2 then
-                                logger:warning("Object with sync index {} is outside map", syncedIndex)
+                                logger:warning("Object with sync index {} is outside map",
+                                               syncedIndex)
                             end
                         end
                         core.virtualizeObject(object)
@@ -190,8 +182,9 @@ local function processPacket(message, packetType, packet)
                                           animationFrame)
                     end
                 else
-                    logger:error("Update packet for object with sync index {} does not exist in client",
-                                 syncedIndex)
+                    logger:error(
+                        "Update packet for object with sync index {} does not exist in client",
+                        syncedIndex)
                 end
             end
         elseif packetType == "@o" then
@@ -272,10 +265,8 @@ local function processPacket(message, packetType, packet)
             if parentObjectSyncedIndex and parentSeatIndex then
                 local parentObjectId = blam.getObjectIdBySyncedIndex(parentObjectSyncedIndex)
                 if parentObjectId then
-                    if DebugMode then
-                        logger:info("Unit with sync index {} is entering vehicle with sync index {}",
-                                    syncedIndex, parentObjectSyncedIndex)
-                    end
+                    logger:debug("Unit with sync index {} is entering vehicle with sync index {}",
+                                 syncedIndex, parentObjectSyncedIndex)
                     engine.gameState.unitEnterVehicle(objectId, parentObjectId, parentSeatIndex)
                 end
             end
@@ -396,21 +387,15 @@ function OnTick()
             end
         end
     end
-    -- FIXME This is not working as expected, it should restore client side projectiles
-    --if lastMapName ~= map then
-    --    lastMapName = map
-    --    if lastMapName == "ui" then
-    --        DisablePlayerCollision = false
-    --        logger:debug("Restoring client side projectiles...")
-    --        engine.hsc.executeScript("allow_client_side_weapon_projectiles 1")
-    --    end
-    --end
 end
 
 --- OnPacket
 ---@param message string
 ---@return boolean?
 function OnPacket(message)
+    if DebugMode and DebugLevel >= 4 then
+        logger:debug("Received packet: {}", message)
+    end
     local packet = message:split(",")
     -- This is a packet sent from the server script for
     if packet and packet[1]:includes("@") then
@@ -487,15 +472,8 @@ end)
 
 OnLoad()
 
---set_callback("map load", "OnMapLoad")
---set_callback("unload", "OnUnload")
---set_callback("command", "OnCommand")
---set_callback("tick", "OnTick")
---set_callback("rcon message", "OnPacket")
---set_callback("preframe", "OnPreFrame")
-
 return {
-    unload = function ()
+    unload = function()
         logger:warning("Unloading main")
         onTickEvent:remove()
         onRconMessageEvent:remove()

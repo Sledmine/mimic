@@ -1,5 +1,7 @@
 local balltze = Balltze
 local engine = Engine
+package.preload["luna"] = nil
+package.loaded["luna"] = nil
 require "luna"
 local commands = require "mimic.commands"
 
@@ -45,6 +47,8 @@ local function loadChimeraCompatibility()
     execute_script = engine.hsc.executeScript
 end
 
+DebugMode = false
+DebugLevel = 1
 local isNewMap = true
 local main
 
@@ -74,6 +78,8 @@ function PluginLoad()
                     if main then
                         main.unload()
                         package.loaded["mimic.main"] = nil
+                        -- Reset memoized values to prevent memory leaks
+                        package.loaded["memoize"] = nil
                         for k, v in pairs(package.loaded) do
                             if k:startswith "mimic" then
                                 package.loaded[k] = nil

@@ -1,6 +1,5 @@
 local glue = require "glue"
 local luna = require "luna"
-local inspect = require "inspect"
 local split = luna.string.split
 local tohex = glue.string.tohex
 local fromhex = glue.string.fromhex
@@ -23,26 +22,7 @@ local color = require "ncolor"
 local hsc = require "mimic.hsc"
 
 local core = {}
-local lastLog = ""
 local packetSeparator = ","
-
-function core.debug(message, ...)
-    if (DebugMode) then
-        if (...) then
-            local formattedMessage = string.format(message, ...)
-            if (lastLog ~= formattedMessage) then
-                lastLog = formattedMessage
-                console_out(formattedMessage)
-            end
-            return
-        end
-        if (lastLog ~= message) then
-            lastLog = message
-            console_out(message)
-        end
-        return
-    end
-end
 
 local function encodeU(format, value)
     -- TODO We might want to memoize this to improve performance
