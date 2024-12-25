@@ -7,6 +7,9 @@
     "author": "Sledmine",
     "name": "Mimic",
     "description": "Events and AI Synchronization for Halo Custom Edition",
+    "deletes": [
+        "lua-global/mimic_client.lua"
+    ],
     "dependencies": [
         {
             "label": "chimera"
