@@ -1,4 +1,12 @@
 --- Transpiler for HSC (Halo Script Language) to Lua
+--- by Sledmine
+----------------------------------------------------
+--- This script attempts to transpile a HSC script for Halo Combat Evolved to Lua
+--- It aims to parse any HSC script made for any version of Halo Combat Evolved (MCC, Custom Edition, Open Sauce, etc)
+--- Officially just Custom Edition is supported, but it will get updates to support MCC later
+--- (not supported yet due to addition of custom functions that can receive parameters and return values)
+--- Uses LPEG for parsing and creating a semi AST to convert to Lua code that trough a
+--- reimplementation of how hsc "scripts" work but using coroutines and integration with Balltze
 local lpeg = require "lpeg"
 local P, R, S = lpeg.P, lpeg.R, lpeg.S -- patterns
 local C, Ct = lpeg.C, lpeg.Ct -- capture
