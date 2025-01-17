@@ -1,12 +1,25 @@
---- Transpiler for HSC (Halo Script Language) to Lua
---- by Sledmine
+-- Transpiler for HSC (Halo Script Language) to Lua
+-- by Sledmine
 ----------------------------------------------------
---- This script attempts to transpile a HSC script for Halo Combat Evolved to Lua
---- It aims to parse any HSC script made for any version of Halo Combat Evolved (MCC, Custom Edition, Open Sauce, etc)
---- Officially just Custom Edition is supported, but it will get updates to support MCC later
---- (not supported yet due to addition of custom functions that can receive parameters and return values)
---- Uses LPEG for parsing and creating a semi AST to convert to Lua code that trough a
---- reimplementation of how hsc "scripts" work but using coroutines and integration with Balltze
+-- This script attempts to transpile a HSC script for Halo Combat Evolved to Lua
+-- It aims to parse any HSC script made for any version of Halo Combat Evolved (MCC, Custom Edition, Open Sauce, etc)
+-- Officially just Custom Edition is supported, but it will get updates to support MCC later
+-- (not supported yet due to addition of custom functions that can receive parameters and return values)
+-- Uses LPEG for parsing and creating a semi AST to convert to Lua code that trough a
+-- reimplementation of how hsc "scripts" work but using coroutines and integration with Balltze
+
+-- In order to use this script you need to add these variables in your HSC script and get them
+-- compiled in your map:
+--[[
+(global boolean lua_boolean false)
+(global short lua_short 0)
+(global long lua_long 0)
+(global real lua_real 0)
+(global string lua_string "")
+(global unit lua_unit none)
+(global object lua_object none)
+(global object_list lua_object_list none)
+--]]
 local lpeg = require "lpeg"
 local P, R, S = lpeg.P, lpeg.R, lpeg.S -- patterns
 local C, Ct = lpeg.C, lpeg.Ct -- capture
@@ -365,7 +378,7 @@ local hsc = require "hsc"
 hsc.begin_random = function(func)
     func()
 end
-hsc.print(message)
+hsc.print = function(message)
     Engine.core.consolePrint("{}", tostring(message))
 end
 
