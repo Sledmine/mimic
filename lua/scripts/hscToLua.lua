@@ -85,197 +85,197 @@ print("-------------------- AST -> LUA ------------------------------")
 local variables = {}
 local blocks = {}
 
-local function convertToLua(ast)
+local function convertAstToLua(astNode)
     local lua = ""
-    if #ast == 0 then
-        ast = {ast}
+    if #astNode == 0 then
+        astNode = {astNode}
     end
-    for i, v in ipairs(ast) do
-        local astArgs = v["args"]
-        if v["function"] == "global" then
-            local varType = astArgs[1]
-            local varName = astArgs[2]
-            local varValue = astArgs[3]
+    for _, node in ipairs(astNode) do
+        local args = node["args"]
+        local name = node["function"]
+        if name == "global" then
+            local varType = args[1]
+            local varName = args[2]
+            local varValue = args[3]
             if type(varValue) == "table" then
-                varValue = convertToLua(varValue)
+                varValue = convertAstToLua(varValue)
             end
             variables[varName] = true
             lua = lua .. "local " .. varName .. " = " .. tostring(varValue) .. "\n"
-        elseif v["function"] == "*" then
-            local var1 = astArgs[1]
-            local var2 = astArgs[2]
+        elseif name == "*" then
+            local var1 = args[1]
+            local var2 = args[2]
             if type(var1) == "table" then
-                var1 = convertToLua(var1)
+                var1 = convertAstToLua(var1)
             end
             if type(var2) == "table" then
-                var2 = convertToLua(var2)
+                var2 = convertAstToLua(var2)
             end
             lua = lua .. var1 .. " * " .. var2 .. "\n"
-        elseif v["function"] == "set" then
-            local varName = astArgs[1]
-            local varValue = astArgs[2]
+        elseif name == "set" then
+            local varName = args[1]
+            local varValue = args[2]
             if type(varValue) == "table" then
-                varValue = convertToLua(varValue)
+                varValue = convertAstToLua(varValue)
             end
             lua = lua .. varName .. " = " .. tostring(varValue) .. "\n"
-        elseif v["function"] == "not" then
-            local varValue = astArgs[1]
+        elseif name == "not" then
+            local varValue = args[1]
             if type(varValue) == "table" then
-                varValue = convertToLua(varValue)
+                varValue = convertAstToLua(varValue)
             end
             lua = lua .. "not " .. varValue .. "\n"
-        elseif v["function"] == "=" then
-            local var1 = astArgs[1]
-            local var2 = astArgs[2]
+        elseif name == "=" then
+            local var1 = args[1]
+            local var2 = args[2]
             if type(var1) == "table" then
-                var1 = convertToLua(var1)
+                var1 = convertAstToLua(var1)
             end
             if type(var2) == "table" then
-                var2 = convertToLua(var2)
+                var2 = convertAstToLua(var2)
             end
             lua = lua .. tostring(var2) .. " == " .. tostring(var1) .. ""
-        elseif v["function"] == "if" then
-            local condition = astArgs[1]
-            local body = astArgs[2]
-            local elseBody = astArgs[3]
-            print("IF", inspect(astArgs))
+        elseif name == "if" then
+            local condition = args[1]
+            local body = args[2]
+            local elseBody = args[3]
             if type(condition) == "table" then
-                condition = convertToLua(condition)
+                condition = convertAstToLua(condition)
             end
             if type(body) == "table" then
-                body = convertToLua(body)
+                body = convertAstToLua(body)
             end
             condition = tostring(condition)
             if type(elseBody) == "table" then
-                elseBody = convertToLua(elseBody)
+                elseBody = convertAstToLua(elseBody)
                 lua = lua .. "if " .. condition .. " then\n" .. body .. "else\n" .. elseBody ..
                           "end\n"
             else
                 lua = lua .. "if " .. condition .. " then\n" .. body .. "end\n"
             end
-        elseif v["function"] == "and" then
-            local var1 = astArgs[1]
-            local var2 = astArgs[2]
+        elseif name == "and" then
+            local var1 = args[1]
+            local var2 = args[2]
             if type(var1) == "table" then
-                var1 = convertToLua(var1)
+                var1 = convertAstToLua(var1)
             end
             if type(var2) == "table" then
-                var2 = convertToLua(var2)
+                var2 = convertAstToLua(var2)
             end
             lua = lua .. var1 .. " and " .. var2 .. ""
-        elseif v["function"] == "begin" then
-            local body = astArgs
+        elseif name == "begin" then
+            local body = args
             for i, v in ipairs(body) do
                 if type(v) == "table" then
-                    body[i] = convertToLua(v)
+                    body[i] = convertAstToLua(v)
                 end
             end
             lua = lua .. table.concat(body, "\n")
             --lua = lua .. "function()\n" .. table.concat(body, "\n") .. "end\n"
-        elseif v["function"] == "begin_random" then
-            local body = astArgs
+        elseif name == "begin_random" then
+            local body = args
             for i, v in ipairs(body) do
                 if type(v) == "table" then
-                    body[i] = convertToLua(v)
+                    body[i] = convertAstToLua(v)
                 end
             end
             -- TODO Check alternatives for this, keep in mind it needs to return a value
             lua = lua .. "hsc.begin_random(function()\n" .. table.concat(body, "\n") .. "end)\n"
-        elseif v["function"] == "or" then
-            local var1 = astArgs[1]
-            local var2 = astArgs[2]
+        elseif name == "or" then
+            local var1 = args[1]
+            local var2 = args[2]
             if type(var1) == "table" then
-                var1 = convertToLua(var1)
+                var1 = convertAstToLua(var1)
             end
             if type(var2) == "table" then
-                var2 = convertToLua(var2)
+                var2 = convertAstToLua(var2)
             end
             lua = lua .. var1 .. " or " .. var2 .. ""
-        elseif v["function"] == "-" then
-            local var1 = astArgs[1]
-            local var2 = astArgs[2]
+        elseif name == "-" then
+            local var1 = args[1]
+            local var2 = args[2]
             if type(var1) == "table" then
-                var1 = convertToLua(var1)
+                var1 = convertAstToLua(var1)
             end
             if type(var2) == "table" then
-                var2 = convertToLua(var2)
+                var2 = convertAstToLua(var2)
             end
             lua = lua .. var1 .. " - " .. var2 .. "\n"
-        elseif v["function"] == "+" then
-            local var1 = astArgs[1]
-            local var2 = astArgs[2]
+        elseif name == "+" then
+            local var1 = args[1]
+            local var2 = args[2]
             if type(var1) == "table" then
-                var1 = convertToLua(var1)
+                var1 = convertAstToLua(var1)
             end
             if type(var2) == "table" then
-                var2 = convertToLua(var2)
+                var2 = convertAstToLua(var2)
             end
             lua = lua .. var1 .. " + " .. var2 .. "\n"
-        elseif v["function"] == "<" then
-            local var1 = astArgs[1]
-            local var2 = astArgs[2]
+        elseif name == "<" then
+            local var1 = args[1]
+            local var2 = args[2]
             if type(var1) == "table" then
-                var1 = convertToLua(var1)
+                var1 = convertAstToLua(var1)
             end
             if type(var2) == "table" then
-                var2 = convertToLua(var2)
+                var2 = convertAstToLua(var2)
             end
             lua = lua .. var1 .. " < " .. var2 .. "\n"
-        elseif v["function"] == ">" then
-            local var1 = astArgs[1]
-            local var2 = astArgs[2]
+        elseif name == ">" then
+            local var1 = args[1]
+            local var2 = args[2]
             if type(var1) == "table" then
-                var1 = convertToLua(var1)
+                var1 = convertAstToLua(var1)
             end
             if type(var2) == "table" then
-                var2 = convertToLua(var2)
+                var2 = convertAstToLua(var2)
             end
             lua = lua .. var1 .. " > " .. var2 .. "\n"
-        elseif v["function"] == "!=" then
-            local var1 = astArgs[1]
-            local var2 = astArgs[2]
+        elseif name == "!=" then
+            local var1 = args[1]
+            local var2 = args[2]
             if type(var1) == "table" then
-                var1 = convertToLua(var1)
+                var1 = convertAstToLua(var1)
             end
             if type(var2) == "table" then
-                var2 = convertToLua(var2)
+                var2 = convertAstToLua(var2)
             end
             lua = lua .. var1 .. " ~= " .. var2 .. "\n"
-        elseif v["function"] == "script" then
-            local scriptType = astArgs[1]
-            local scriptName = astArgs[2]
-            local scriptBody = astArgs[3]
+        elseif name == "script" then
+            local scriptType = args[1]
+            local scriptName = args[2]
+            local scriptBody = args[3]
             local scriptReturnType
             if scriptType == "static" then
-                scriptReturnType = astArgs[2]
-                scriptName = astArgs[3]
-                scriptBody = astArgs[4]
+                scriptReturnType = args[2]
+                scriptName = args[3]
+                scriptBody = args[4]
             end
             --lua = lua .. "function " .. scriptName .. "()\n"
             blocks[scriptName] = scriptBody
             lua = lua .. scriptName .. " = function(call, sleep)\n"
-            local args = astArgs
+            local args = args
             for i, v in ipairs(args) do
                 if type(v) == "table" then
                     if scriptReturnType and scriptReturnType ~= "str_void" and i == #args then
-                        lua = lua .. "return " .. convertToLua(v)
+                        lua = lua .. "return " .. convertAstToLua(v)
                     else
-                        lua = lua .. "" .. convertToLua(v)
+                        lua = lua .. "" .. convertAstToLua(v)
                     end
                 end
             end
             lua = lua .. "end\n"
-        elseif v["function"] == "wake" then
-            local scriptName = astArgs[1]
+        elseif name == "wake" then
+            local scriptName = args[1]
             lua = lua .. "wake(" .. scriptName .. ")\n"
-        elseif v["function"] == "sleep" then
-            for i, v in ipairs(astArgs) do
+        elseif name == "sleep" then
+            for i, v in ipairs(args) do
                 if type(v) == "table" then
-                    astArgs[i] = convertToLua(v)
+                    args[i] = convertAstToLua(v)
                 end
             end
-            local sleepForTicks = astArgs[1]
-            local scriptName = astArgs[2]
+            local sleepForTicks = args[1]
+            local scriptName = args[2]
             if scriptName then
                 if sleepForTicks == "-1" then
                     -- TODO Ccheck about this it seems like this tries to stop another script
@@ -286,35 +286,35 @@ local function convertToLua(ast)
             else
                 lua = lua .. "sleep(" .. sleepForTicks .. ")\n"
             end
-        elseif v["function"] == "sleep_until" then
-            for i, v in ipairs(astArgs) do
+        elseif name == "sleep_until" then
+            for i, v in ipairs(args) do
                 if type(v) == "table" then
-                    astArgs[i] = convertToLua(v)
+                    args[i] = convertAstToLua(v)
                 end
             end
-            if #astArgs == 1 then
-                local condition = astArgs[1]
+            if #args == 1 then
+                local condition = args[1]
                 lua = lua .. "sleep(function() return " .. condition .. " end)\n"
-            elseif #astArgs == 2 then
-                local condition = astArgs[1]
-                local everyTicks = astArgs[2]
+            elseif #args == 2 then
+                local condition = args[1]
+                local everyTicks = args[2]
                 lua = lua .. "sleep(function() return " .. condition .. " end, " .. everyTicks ..
                           ")\n"
             else
-                local condition = astArgs[1]
-                local everyTicks = astArgs[2]
-                local maximumTicks = astArgs[3]
+                local condition = args[1]
+                local everyTicks = args[2]
+                local maximumTicks = args[3]
                 lua = lua .. "sleep(function() return " .. condition .. " end, " .. everyTicks ..
                           ", " .. maximumTicks .. ")\n"
             end
         else
-            local functionName = v["function"]
+            local functionName = name
             -- print("General function call", functionName)
-            local functionArgs = astArgs
+            local functionArgs = args
             -- print("Args", inspect(functionArgs))
             for i, v in ipairs(functionArgs) do
                 if type(v) == "table" then
-                    functionArgs[i] = convertToLua(v)
+                    functionArgs[i] = convertAstToLua(v)
                 end
             end
             -- print("NewArgs", inspect(functionArgs))
@@ -357,8 +357,7 @@ local function convertToLua(ast)
     return lua
 end
 
--- print(inspect(test))
-local lua = convertToLua(hsc)
+local lua = convertAstToLua(hsc)
 local header = [[---------- Transpiled from HSC to Lua ----------
 local script = require "script".call
 local wake = require"script".wake
