@@ -5,30 +5,37 @@ local engine = Engine
 local callTrace = {}
 
 ---Sleeps for a certain amount of ticks or until a condition is met
----@param sleepFor number | fun(): boolean
----@param everyTicks? number
+---@overload fun(ticks: number)
+---@overload fun(ticks: number, script: thread)
+---@overload fun(sleepUntil: fun(): boolean)
+---@overload fun(ticks: number, everyTicks?: number, maximumTicks?: number)
+---@param ticksOrCondition number | fun(): boolean
+---@param everyTicksOrThread? number
 ---@param maximumTicks? number
-local function waitNTicks(sleepFor, everyTicks, maximumTicks)
-    local ticks = type(sleepFor) == "number" and sleepFor or nil
-    if ticks then 
-        logger:warning("Sleeping for " .. sleepFor .. " ticks")
+local function waitFor(ticksOrCondition, everyTicksOrThread, maximumTicks)
+    local ticks = type(ticksOrCondition) == "number" and ticksOrCondition or nil
+    local sleepUntil = type(ticksOrCondition) == "function" and ticksOrCondition or nil
+    local threadToSleep = type(everyTicksOrThread) == "thread" and ticks or nil
+    if ticks then
+        if threadToSleep then
+            logger:warning("Causing another thread to sleep is not implemented yet!!!")
+            return
+        end
+        --logger:warning("Sleeping for " .. ticksOrCondition .. " ticks")
         local currentTicks = engine.core.getTickCount()
         while engine.core.getTickCount() - currentTicks < ticks do
-            --logger:debug("Sleeping...")
+            -- logger:debug("Sleeping...")
             coroutine.yield()
         end
     end
-    local sleepUntil = type(sleepFor) == "function" and sleepFor or nil
     if sleepUntil then
-        logger:warning("Sleeping until condition is true")
+        --logger:warning("Sleeping until condition is true")
         local currentTicks = engine.core.getTickCount()
-        --while sleepUntil() ~= true or (maximumTicks and engine.core.getTickCount() - currentTicks < maximumTicks) do
-        while sleepUntil() ~= true do
-            --logger:debug("Sleeping...")
+        while sleepUntil() ~= true or (maximumTicks and engine.core.getTickCount() - currentTicks > maximumTicks) do
+            -- logger:debug("Sleeping...")
             coroutine.yield()
         end
     end
-    --while (ticks and (engine.core.getTickCount() - currentTicks < ticks) or sleepUntil and sleepUntil() ~= true) do
     coroutine.yield("_finished")
 end
 
@@ -42,23 +49,23 @@ end
 
 function script.dispatch()
     for ref, v in pairs(callTrace) do
-        local callCo = v[1]
+        local callThread = v[1]
         local run = v[2]
-        local isCallAlive = coroutine.status(callCo) ~= "dead"
-        local isWaitingForOtherCoroutine = callTrace[callCo]
+        local isCallAlive = coroutine.status(callThread) ~= "dead"
+        local isWaitingForOtherCoroutine = callTrace[callThread]
         if isCallAlive and not isWaitingForOtherCoroutine then
-            local isCallOk, callResult = (run or coroutine.resume)(callCo)
-            local isCallDead = coroutine.status(callCo) == "dead"
-            --logger:info("Routine: {} is {}, result: {}", tostring(co), coroutine.status(co), tostring(callResult))
+            local isCallOk, callResult = (run or coroutine.resume)(callThread)
+            local isCallDead = coroutine.status(callThread) == "dead"
+            -- logger:info("Routine: {} is {}, result: {}", tostring(co), coroutine.status(co), tostring(callResult))
             if not isCallOk then
                 error(callResult)
             end
             if isCallOk then
                 if callResult then
                     if callResult == "_finished" then
-                        logger:info("Call finished sleeping")
+                        --logger:debug("Call finished sleeping")
                         handleCoroutine(ref)
-                        --callTrace[ref] = nil
+                        -- callTrace[ref] = nil
                     else
                         logger:info("Call returned: " .. tostring(callResult))
                         handleCoroutine(ref, callResult)
@@ -66,18 +73,18 @@ function script.dispatch()
                     end
                 end
                 if not callResult and isCallDead then
-                    logger:info("Call is dead")
-                    handleCoroutine(ref)
-                    --callTrace[ref] = nil
+                    logger:warning("Call is dead")
+                    -- TODO Verify this is a valid case
+                    -- So far this happens when invoking a non parented call, like when using wake
+                    local parentIsAlive = coroutine.status(ref) ~= "dead"
+                    if parentIsAlive then
+                        handleCoroutine(ref)
+                    end
                 end
             end
         end
         if not isCallAlive then
-            -- local ok, result = coroutine.resume(ref)
-            -- if not ok then
-            --    error("Coroutine failed: " .. result)
-            -- end
-            logger:warning("Coroutine {} is dead, removing...", tostring(callCo))
+            logger:warning("Call {} is dead, removing parent thread...", tostring(callThread))
             callTrace[ref] = nil
         end
     end
@@ -85,36 +92,33 @@ function script.dispatch()
 end
 
 function script.call(func, ...)
-    --local currentRefFuncName = debug.getlocal(1, 1)
+    -- local currentRefFuncName = debug.getlocal(1, 1)
     local ref = coroutine.create(func)
     local call = function(funcToCall)
-        -- table.insert(callTrace, {co, script.call(funcToCall)})
-        callTrace[ref] = {script.call(funcToCall)}
+        local run, callThread = script.call(funcToCall)
+        callTrace[ref] = {callThread, run}
         return coroutine.yield()
     end
-    local sleep = function(sleepFor)
-        -- callTrace[ref] = {script.call(function()
-        --    waitNTicks(sleepForTicks)
-        -- end)}
-        callTrace[ref] = {
-            coroutine.create(function()
-                waitNTicks(sleepFor)
-            end)
-        }
+    local sleep = function(...)
+        local args = {...}
+        local run, callThread = script.call(function()
+            waitFor(table.unpack(args))
+        end)
+        callTrace[ref] = {callThread, run}
         return coroutine.yield()
     end
-    return ref, function()
+    local run = function()
         return coroutine.resume(ref, call, sleep)
     end
+    return run, ref
 end
 
 function script.wake(func)
-    --local ref, run = script.call(function (call, sleep)
+    -- local ref, run = script.call(function (call, sleep)
     --    sleep(1)
     --    return call(func)
-    --end)
-    local ref, run = script.call(func)
-    run()
+    -- end)
+    script.call(func)()
 end
 
 return script
