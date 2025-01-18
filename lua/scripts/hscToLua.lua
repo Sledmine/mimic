@@ -7,7 +7,6 @@
 -- (not supported yet due to addition of custom functions that can receive parameters and return values)
 -- Uses LPEG for parsing and creating a semi AST to convert to Lua code that trough a
 -- reimplementation of how hsc "scripts" work but using coroutines and integration with Balltze
-
 -- In order to use this script you need to add these variables in your HSC script and get them
 -- compiled in your map:
 --[[
@@ -19,7 +18,7 @@
 (global unit lua_unit none)
 (global object lua_object none)
 (global object_list lua_object_list none)
---]]
+--]] --
 local lpeg = require "lpeg"
 local P, R, S = lpeg.P, lpeg.R, lpeg.S -- patterns
 local C, Ct = lpeg.C, lpeg.Ct -- capture
@@ -27,6 +26,16 @@ local V = lpeg.V -- variable
 local inspect = require "lua.modules.inspect"
 local luna = require "lua.modules.luna"
 local hscdoc = require "lua.modules.hscDoc"
+local argparse = require "lua.scripts.modules.argparse"
+
+local parser = argparse("hscToLua", "Transpiler for HSC (Halo Script Language) to Lua")
+parser:argument("input", "Input HSC file to transpile")
+parser:option("-o --output", "Output Lua file to save the transpiled code", "output.lua")
+parser:option("--debug", "Enable debug mode", false)
+parser:option("--module", "Write script as a module with a given name", "module")
+
+local args = parser:parse()
+print(inspect(args))
 
 local parser = P {
     "program", -- initial rule
@@ -88,13 +97,6 @@ end
 -- (not global_dialog_on)
 -- ]])
 
-print("------------------- AST -------------------------------")
-
-local hsc = parser:match(luna.file.read(arg[1]))
-print(inspect(hsc))
-
-print("-------------------- AST -> LUA ------------------------------")
-
 local variables = {}
 local blocks = {}
 
@@ -104,20 +106,20 @@ local function convertAstToLua(astNode)
         astNode = {astNode}
     end
     for _, node in ipairs(astNode) do
-        local args = node["args"]
+        local hscArgs = node["args"]
         local name = node["function"]
         if name == "global" then
-            local varType = args[1]
-            local varName = args[2]
-            local varValue = args[3]
+            local varType = hscArgs[1]
+            local varName = hscArgs[2]
+            local varValue = hscArgs[3]
             if type(varValue) == "table" then
                 varValue = convertAstToLua(varValue)
             end
             variables[varName] = true
             lua = lua .. "local " .. varName .. " = " .. tostring(varValue) .. "\n"
         elseif name == "*" then
-            local var1 = args[1]
-            local var2 = args[2]
+            local var1 = hscArgs[1]
+            local var2 = hscArgs[2]
             if type(var1) == "table" then
                 var1 = convertAstToLua(var1)
             end
@@ -126,21 +128,21 @@ local function convertAstToLua(astNode)
             end
             lua = lua .. var1 .. " * " .. var2 .. "\n"
         elseif name == "set" then
-            local varName = args[1]
-            local varValue = args[2]
+            local varName = hscArgs[1]
+            local varValue = hscArgs[2]
             if type(varValue) == "table" then
                 varValue = convertAstToLua(varValue)
             end
             lua = lua .. varName .. " = " .. tostring(varValue) .. "\n"
         elseif name == "not" then
-            local varValue = args[1]
+            local varValue = hscArgs[1]
             if type(varValue) == "table" then
                 varValue = convertAstToLua(varValue)
             end
             lua = lua .. "not " .. varValue .. "\n"
         elseif name == "=" then
-            local var1 = args[1]
-            local var2 = args[2]
+            local var1 = hscArgs[1]
+            local var2 = hscArgs[2]
             if type(var1) == "table" then
                 var1 = convertAstToLua(var1)
             end
@@ -149,9 +151,9 @@ local function convertAstToLua(astNode)
             end
             lua = lua .. tostring(var2) .. " == " .. tostring(var1) .. ""
         elseif name == "if" then
-            local condition = args[1]
-            local body = args[2]
-            local elseBody = args[3]
+            local condition = hscArgs[1]
+            local body = hscArgs[2]
+            local elseBody = hscArgs[3]
             if type(condition) == "table" then
                 condition = convertAstToLua(condition)
             end
@@ -167,46 +169,57 @@ local function convertAstToLua(astNode)
                 lua = lua .. "if " .. condition .. " then\n" .. body .. "end\n"
             end
         elseif name == "and" then
-            local var1 = args[1]
-            local var2 = args[2]
-            if type(var1) == "table" then
-                var1 = convertAstToLua(var1)
+            local body = hscArgs
+            for i, v in ipairs(body) do
+                if type(v) == "table" then
+                    body[i] = convertAstToLua(v)
+                end
             end
-            if type(var2) == "table" then
-                var2 = convertAstToLua(var2)
-            end
-            lua = lua .. var1 .. " and " .. var2 .. ""
+            lua = lua .. table.concat(body, " and ") .. ""
         elseif name == "begin" then
-            local body = args
+            local body = hscArgs
             for i, v in ipairs(body) do
                 if type(v) == "table" then
                     body[i] = convertAstToLua(v)
                 end
             end
             lua = lua .. table.concat(body, "\n")
-            --lua = lua .. "function()\n" .. table.concat(body, "\n") .. "end\n"
+            -- Should we consider beging blocks as self running functions?
+            --
+            -- lua = lua .. "function()\n" .. table.concat(body, "\n") .. "end\n"
+            --
+            -- This might help to produce more accurate "blocks" of code that keep scope of execution
+            -- but it will look weird and might not be easy to read
         elseif name == "begin_random" then
-            local body = args
+            local body = hscArgs
             for i, v in ipairs(body) do
                 if type(v) == "table" then
                     body[i] = convertAstToLua(v)
                 end
             end
-            -- TODO Check alternatives for this, keep in mind it needs to return a value
-            lua = lua .. "hsc.begin_random(function()\n" .. table.concat(body, "\n") .. "end)\n"
+            -- This relates to a begin like block, begin blocks will execute directly in the same scope
+            -- but begin_random might be a function that executes multiple begin blocks in a random order
+            --
+            -- So we need to wrap each block in a function to be executed in their own scope but
+            -- allowing to be run in a random order
+            body = table.map(body, function(v)
+                return "function() " .. v .. " end"
+            end)
+            lua = lua .. "hsc.begin_random({\n" .. table.concat(body, ",\n") .. "})\n"
+            -- This might be an edge case so it is still safely to unwrap "begin" blocks in same
+            -- scope after all, cause there are no other functions that explicitly run another
+            -- function in different scopes.. I think
         elseif name == "or" then
-            local var1 = args[1]
-            local var2 = args[2]
-            if type(var1) == "table" then
-                var1 = convertAstToLua(var1)
+            local body = hscArgs
+            for i, v in ipairs(body) do
+                if type(v) == "table" then
+                    body[i] = convertAstToLua(v)
+                end
             end
-            if type(var2) == "table" then
-                var2 = convertAstToLua(var2)
-            end
-            lua = lua .. var1 .. " or " .. var2 .. ""
+            lua = lua .. table.concat(body, " or ") .. ""
         elseif name == "-" then
-            local var1 = args[1]
-            local var2 = args[2]
+            local var1 = hscArgs[1]
+            local var2 = hscArgs[2]
             if type(var1) == "table" then
                 var1 = convertAstToLua(var1)
             end
@@ -215,8 +228,8 @@ local function convertAstToLua(astNode)
             end
             lua = lua .. var1 .. " - " .. var2 .. "\n"
         elseif name == "+" then
-            local var1 = args[1]
-            local var2 = args[2]
+            local var1 = hscArgs[1]
+            local var2 = hscArgs[2]
             if type(var1) == "table" then
                 var1 = convertAstToLua(var1)
             end
@@ -225,8 +238,8 @@ local function convertAstToLua(astNode)
             end
             lua = lua .. var1 .. " + " .. var2 .. "\n"
         elseif name == "<" then
-            local var1 = args[1]
-            local var2 = args[2]
+            local var1 = hscArgs[1]
+            local var2 = hscArgs[2]
             if type(var1) == "table" then
                 var1 = convertAstToLua(var1)
             end
@@ -235,8 +248,8 @@ local function convertAstToLua(astNode)
             end
             lua = lua .. var1 .. " < " .. var2 .. "\n"
         elseif name == ">" then
-            local var1 = args[1]
-            local var2 = args[2]
+            local var1 = hscArgs[1]
+            local var2 = hscArgs[2]
             if type(var1) == "table" then
                 var1 = convertAstToLua(var1)
             end
@@ -245,8 +258,8 @@ local function convertAstToLua(astNode)
             end
             lua = lua .. var1 .. " > " .. var2 .. "\n"
         elseif name == "!=" then
-            local var1 = args[1]
-            local var2 = args[2]
+            local var1 = hscArgs[1]
+            local var2 = hscArgs[2]
             if type(var1) == "table" then
                 var1 = convertAstToLua(var1)
             end
@@ -255,19 +268,22 @@ local function convertAstToLua(astNode)
             end
             lua = lua .. var1 .. " ~= " .. var2 .. "\n"
         elseif name == "script" then
-            local scriptType = args[1]
-            local scriptName = args[2]
-            local scriptBody = args[3]
+            local scriptType = hscArgs[1]
+            local scriptName = hscArgs[2]
+            local scriptBody = hscArgs[3]
             local scriptReturnType
             if scriptType == "static" then
-                scriptReturnType = args[2]
-                scriptName = args[3]
-                scriptBody = args[4]
+                scriptReturnType = hscArgs[2]
+                scriptName = hscArgs[3]
+                scriptBody = hscArgs[4]
             end
-            --lua = lua .. "function " .. scriptName .. "()\n"
             blocks[scriptName] = scriptBody
-            lua = lua .. scriptName .. " = function(call, sleep)\n"
-            local args = args
+            if args.module then
+                lua = lua .. "function " .. args.module .. "." .. scriptName .. "(call, sleep)\n"
+            else
+                lua = lua .. "function " .. scriptName .. "(call, sleep)\n"
+            end
+            local args = hscArgs
             for i, v in ipairs(args) do
                 if type(v) == "table" then
                     if scriptReturnType and scriptReturnType ~= "str_void" and i == #args then
@@ -279,16 +295,20 @@ local function convertAstToLua(astNode)
             end
             lua = lua .. "end\n"
         elseif name == "wake" then
-            local scriptName = args[1]
-            lua = lua .. "wake(" .. scriptName .. ")\n"
+            local scriptName = hscArgs[1]
+            if args.module then
+                lua = lua .. "wake(" .. args.module .. "." .. scriptName .. ")\n"
+            else
+                lua = lua .. "wake(" .. scriptName .. ")\n"
+            end
         elseif name == "sleep" then
-            for i, v in ipairs(args) do
+            for i, v in ipairs(hscArgs) do
                 if type(v) == "table" then
-                    args[i] = convertAstToLua(v)
+                    hscArgs[i] = convertAstToLua(v)
                 end
             end
-            local sleepForTicks = args[1]
-            local scriptName = args[2]
+            local sleepForTicks = hscArgs[1]
+            local scriptName = hscArgs[2]
             if scriptName then
                 if sleepForTicks == "-1" then
                     -- TODO Ccheck about this it seems like this tries to stop another script
@@ -300,30 +320,30 @@ local function convertAstToLua(astNode)
                 lua = lua .. "sleep(" .. sleepForTicks .. ")\n"
             end
         elseif name == "sleep_until" then
-            for i, v in ipairs(args) do
+            for i, v in ipairs(hscArgs) do
                 if type(v) == "table" then
-                    args[i] = convertAstToLua(v)
+                    hscArgs[i] = convertAstToLua(v)
                 end
             end
-            if #args == 1 then
-                local condition = args[1]
+            if #hscArgs == 1 then
+                local condition = hscArgs[1]
                 lua = lua .. "sleep(function() return " .. condition .. " end)\n"
-            elseif #args == 2 then
-                local condition = args[1]
-                local everyTicks = args[2]
+            elseif #hscArgs == 2 then
+                local condition = hscArgs[1]
+                local everyTicks = hscArgs[2]
                 lua = lua .. "sleep(function() return " .. condition .. " end, " .. everyTicks ..
                           ")\n"
             else
-                local condition = args[1]
-                local everyTicks = args[2]
-                local maximumTicks = args[3]
+                local condition = hscArgs[1]
+                local everyTicks = hscArgs[2]
+                local maximumTicks = hscArgs[3]
                 lua = lua .. "sleep(function() return " .. condition .. " end, " .. everyTicks ..
                           ", " .. maximumTicks .. ")\n"
             end
         else
             local functionName = name
             -- print("General function call", functionName)
-            local functionArgs = args
+            local functionArgs = hscArgs
             -- print("Args", inspect(functionArgs))
             for i, v in ipairs(functionArgs) do
                 if type(v) == "table" then
@@ -351,39 +371,84 @@ local function convertAstToLua(astNode)
                     end
                 end
             end
-            --local hscFunction = table.find(hscdoc, function(doc)
+            -- local hscFunction = table.find(hscdoc, function(doc)
             --    return doc.funcName:trim() == functionName:trim()
-            --end)
-            --if hscFuntion then
+            -- end)
+            -- if hscFuntion then
             --    print("HSC FUNCTION", inspect(hscFunction))
             --    functionName = "hsc." .. hscFunction.funcName
             --    os.exit()
-            --end
-            --lua = lua .. functionName .. "(" .. table.concat(functionArgs, ", ") .. ")\n"
+            -- end
+            -- lua = lua .. functionName .. "(" .. table.concat(functionArgs, ", ") .. ")\n"
             if blocks[functionName] then
-                lua = lua .. "call(" .. functionName .. ")\n"
+                if args.module then
+                    lua = lua .. "call(" .. args.module .. "." .. functionName .. ")\n"
+                else
+                    lua = lua .. "call(" .. functionName .. ")\n"
+                end
             else
-                lua = lua .. "hsc." .. functionName .. "(" .. table.concat(functionArgs, ", ") .. ")\n"
+                lua = lua .. "hsc." .. functionName .. "(" .. table.concat(functionArgs, ", ") ..
+                          ")\n"
             end
         end
     end
     return lua
 end
 
+local hsc = parser:match(luna.file.read(args.input))
+
+if args.debug then
+    print("------------------- AST -------------------------------")
+    print(inspect(hsc))
+end
+
 local lua = convertAstToLua(hsc)
 local header = [[---------- Transpiled from HSC to Lua ----------
-local script = require "script".call
+local script = require"script".call
 local wake = require"script".wake
 local hsc = require "hsc"
-hsc.begin_random = function(func)
-    func()
+math.randomseed(os.time())
+-- Reimplement HSC functions with Lua
+hsc.begin_random = function(functions)
+    local functions = table.copy(functions)
+    local function random()
+        local index = math.random(1, #functions)
+        local func = functions[index]
+        table.remove(functions, index)
+        return func
+    end
+    while #functions > 0 do
+        random()()
+    end
 end
+local easy = "easy"
+local normal = "normal"
+local hard = "hard"
+local impossible = "impossible"
+hsc.game_difficulty_get = function()
+    -- TODO Implement this by reading game actual difficulty
+    return normal
+end
+hsc.game_difficulty_get_real = hsc.game_difficulty_get
 hsc.print = function(message)
     Engine.core.consolePrint("{}", tostring(message))
 end
-
+---------- Finish HSC Header to Lua ----------
 ]]
+
+if args.module then
+    header = header .. "local " .. args.module .. " = {}\n\n"
+end
+
 lua = header .. lua
-luna.file.write("output.lua", lua)
---print("-------------------- LUA ------------------------------")
---print(lua)
+
+if args.module then
+    lua = lua .. "\nreturn " .. args.module
+end
+
+if args.debug then
+    print("-------------------- AST -> LUA ------------------------------")
+    print(lua)
+end
+
+assert(luna.file.write(args.output, lua), "Error writing Lua file")
