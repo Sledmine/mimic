@@ -39,7 +39,7 @@ local parser = argparse("hscToLua", "Transpiler for HSC (Halo Script Language) t
 parser:argument("input", "Input HSC file to transpile")
 parser:option("-o --output", "Output Lua file to save the transpiled code", "output.lua")
 parser:option("--debug", "Enable debug mode", false)
-parser:option("--module", "Write script as a module with a given name", "module")
+parser:option("--module", "Write script as a module with a given name")
 
 local args = parser:parse()
 
@@ -201,7 +201,13 @@ local function convertAstToLua(astNode)
                     body[i] = convertAstToLua(v)
                 end
             end
-            lua = lua .. table.concat(body, "\n")
+            -- Most begin elements in body will already have a newline at the end
+            -- so we don't need to add a new line at the end of each element
+            -- Or do we?... Not having it makes it more readable tho
+            --
+            -- lua = lua .. table.concat(body, "\n")
+            --
+            lua = lua .. table.concat(body, "")
             -- Should we consider begin blocks as self running functions?
             --
             -- lua = lua .. "function()\n" .. table.concat(body, "\n") .. "end\n"
@@ -302,10 +308,9 @@ local function convertAstToLua(astNode)
             else
                 lua = lua .. "function " .. scriptName .. "(call, sleep)\n"
             end
-            local args = hscArgs
-            for i, v in ipairs(args) do
+            for i, v in ipairs(hscArgs) do
                 if type(v) == "table" then
-                    if scriptReturnType and scriptReturnType ~= "str_void" and i == #args then
+                    if scriptReturnType and scriptReturnType ~= "str_void" and i == #hscArgs then
                         lua = lua .. "return " .. convertAstToLua(v)
                     else
                         lua = lua .. "" .. convertAstToLua(v)
@@ -314,7 +319,11 @@ local function convertAstToLua(astNode)
             end
             lua = lua .. "end\n"
             if scriptType == "continuous" then
-                lua = lua .. "script.continuous(" .. scriptName .. ")\n"
+                if args.module then
+                    lua = lua .. "script.continuous(" .. args.module .. "." .. scriptName .. ")\n"
+                else
+                    lua = lua .. "script.continuous(" .. scriptName .. ")\n"
+                end
             end
             lua = lua .. "\n"
         elseif name == "wake" then
