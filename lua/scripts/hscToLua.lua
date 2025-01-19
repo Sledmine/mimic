@@ -5,8 +5,13 @@
 -- It aims to parse any HSC script made for any version of Halo Combat Evolved (MCC, Custom Edition, Open Sauce, etc)
 -- Officially just Custom Edition is supported, but it will get updates to support MCC later
 -- (not supported yet due to addition of custom functions that can receive parameters and return values)
--- Uses LPEG for parsing and creating a semi AST to convert to Lua code that trough a
--- reimplementation of how hsc "scripts" work but using coroutines and integration with Balltze
+-- Uses LPEG for parsing and creating a semi AST to convert to Lua code, using an proto module script
+-- reimplementation of how hsc "scripts" work, but using coroutines and integrating with Balltze.
+--
+-- WARNING: Transpiler will not take care of Lua code formatting, it will just transpile the code
+-- as is, output will be valid Lua syntax but you will need an external tool to format the code
+-- properly, like https://github.com/Koihik/LuaFormatter or similar.
+--
 -- In order to use this script you need to add these variables in your HSC script and get them
 -- compiled in your map:
 --[[
@@ -19,13 +24,15 @@
 (global object lua_object none)
 (global object_list lua_object_list none)
 --]] --
+-- This variables will be used later on as some cache variables to store values so we can execute
+-- HSC using built in functions from the game and store the actual results from these and get them
+-- back to Lua again and into the game.
 local lpeg = require "lpeg"
 local P, R, S = lpeg.P, lpeg.R, lpeg.S -- patterns
 local C, Ct = lpeg.C, lpeg.Ct -- capture
 local V = lpeg.V -- variable
 local inspect = require "lua.modules.inspect"
 local luna = require "lua.modules.luna"
-local hscdoc = require "lua.modules.hscDoc"
 local argparse = require "lua.scripts.modules.argparse"
 
 local parser = argparse("hscToLua", "Transpiler for HSC (Halo Script Language) to Lua")
@@ -35,7 +42,6 @@ parser:option("--debug", "Enable debug mode", false)
 parser:option("--module", "Write script as a module with a given name", "module")
 
 local args = parser:parse()
-print(inspect(args))
 
 local parser = P {
     "program", -- initial rule
@@ -97,8 +103,20 @@ end
 -- (not global_dialog_on)
 -- ]])
 
+-- Track variables and user defined functions
+-- It will help us to diffentiate symbols later on
 local variables = {}
-local blocks = {}
+local userDefinedFunctions = {}
+
+--- Escape a string value to be used in Lua code
+--- @param value string
+--- @return string
+local function escapeStringValue(value)
+    local str = value
+    str = str:replace("\\", "\\\\")
+    str = "\"" .. str .. "\""
+    return str
+end
 
 local function convertAstToLua(astNode)
     local lua = ""
@@ -184,12 +202,13 @@ local function convertAstToLua(astNode)
                 end
             end
             lua = lua .. table.concat(body, "\n")
-            -- Should we consider beging blocks as self running functions?
+            -- Should we consider begin blocks as self running functions?
             --
             -- lua = lua .. "function()\n" .. table.concat(body, "\n") .. "end\n"
             --
             -- This might help to produce more accurate "blocks" of code that keep scope of execution
             -- but it will look weird and might not be easy to read
+            -- Check out the "begin_random" block for an example of possible conflicting cases
         elseif name == "begin_random" then
             local body = hscArgs
             for i, v in ipairs(body) do
@@ -277,7 +296,7 @@ local function convertAstToLua(astNode)
                 scriptName = hscArgs[3]
                 scriptBody = hscArgs[4]
             end
-            blocks[scriptName] = scriptBody
+            userDefinedFunctions[scriptName] = scriptBody
             if args.module then
                 lua = lua .. "function " .. args.module .. "." .. scriptName .. "(call, sleep)\n"
             else
@@ -294,6 +313,10 @@ local function convertAstToLua(astNode)
                 end
             end
             lua = lua .. "end\n"
+            if scriptType == "continuous" then
+                lua = lua .. "script.continuous(" .. scriptName .. ")\n"
+            end
+            lua = lua .. "\n"
         elseif name == "wake" then
             local scriptName = hscArgs[1]
             if args.module then
@@ -341,36 +364,30 @@ local function convertAstToLua(astNode)
                           ", " .. maximumTicks .. ")\n"
             end
         else
-            local functionName = name
-            -- print("General function call", functionName)
-            local functionArgs = hscArgs
-            -- print("Args", inspect(functionArgs))
-            for i, v in ipairs(functionArgs) do
+            for i, v in ipairs(hscArgs) do
                 if type(v) == "table" then
-                    functionArgs[i] = convertAstToLua(v)
+                    hscArgs[i] = convertAstToLua(v)
                 end
             end
-            -- print("NewArgs", inspect(functionArgs))
-            for argPos, v in ipairs(functionArgs) do
-                -- if type(v) == "string" and (v:startswith("str_") or hscdoc[functionName]) then
-                -- print("ARG", functionName, argPos, v)
-                if type(v) == "string" and v:startswith("str_") then
-                    local str = v:replace("str_", "")
-                    str = str:replace("\\", "\\\\")
-                    str = "\"" .. str .. "\""
-                    functionArgs[argPos] = str
-                elseif type(v) == "boolean" then
-                    functionArgs[argPos] = tostring(v)
-                elseif type(v) == "string" then
-                    if not v:includes("(") and not v:includes(")") and not v:includes(" ") and
-                        not tonumber(v) and not variables[v] then
-                        local str = v
-                        str = str:replace("\\", "\\\\")
-                        str = "\"" .. str .. "\""
-                        functionArgs[argPos] = str
+            for index, arg in ipairs(hscArgs) do
+                -- Argument is a string value (not a symbol cause it starts with "str_")
+                if type(arg) == "string" and arg:startswith("str_") then
+                    hscArgs[index] = escapeStringValue(arg:replace("str_", ""))
+                elseif type(arg) == "boolean" then
+                    hscArgs[index] = tostring(arg)
+                elseif type(arg) == "string" then
+                    if not arg:includes("(") and not arg:includes(")") and not arg:includes(" ") and
+                        not tonumber(arg) and not variables[arg] then
+                        hscArgs[index] = escapeStringValue(arg)
                     end
                 end
             end
+            -- We might want to restore this later on, not sure if we will ever need this,
+            -- it all depends if HSC allowed you to create functions with the same names as the
+            -- built-in functions, I highly doubt it but needs checking
+            --
+            -- local hscdoc = require "lua.modules.hscDoc"
+            --
             -- local hscFunction = table.find(hscdoc, function(doc)
             --    return doc.funcName:trim() == functionName:trim()
             -- end)
@@ -380,22 +397,32 @@ local function convertAstToLua(astNode)
             --    os.exit()
             -- end
             -- lua = lua .. functionName .. "(" .. table.concat(functionArgs, ", ") .. ")\n"
-            if blocks[functionName] then
+            --
+            if userDefinedFunctions[name] then
+                -- We are calling a user defined function
+
                 if args.module then
-                    lua = lua .. "call(" .. args.module .. "." .. functionName .. ")\n"
+                    lua = lua .. "call(" .. args.module .. "." .. name .. ")\n"
                 else
-                    lua = lua .. "call(" .. functionName .. ")\n"
+                    lua = lua .. "call(" .. name .. ")\n"
                 end
             else
-                lua = lua .. "hsc." .. functionName .. "(" .. table.concat(functionArgs, ", ") ..
-                          ")\n"
+                -- We are calling a built in function
+                lua = lua .. "hsc." .. name .. "(" .. table.concat(hscArgs, ", ") .. ")\n"
             end
         end
     end
     return lua
 end
 
-local hsc = parser:match(luna.file.read(args.input))
+-- HSC file as a string
+local hscInput = luna.file.read(args.input)
+assert(hscInput, "Error reading HSC file")
+-- Remove all comments from the HSC script (; is the comment delimiter)
+--
+-- Maybe we should consider adding a flag to keep comments in the future
+hscInput = hscInput:gsub(";[^\n]*", "")
+local hsc = parser:match(hscInput)
 
 if args.debug then
     print("------------------- AST -------------------------------")
@@ -407,33 +434,11 @@ local header = [[---------- Transpiled from HSC to Lua ----------
 local script = require"script".call
 local wake = require"script".wake
 local hsc = require "hsc"
-math.randomseed(os.time())
--- Reimplement HSC functions with Lua
-hsc.begin_random = function(functions)
-    local functions = table.copy(functions)
-    local function random()
-        local index = math.random(1, #functions)
-        local func = functions[index]
-        table.remove(functions, index)
-        return func
-    end
-    while #functions > 0 do
-        random()()
-    end
-end
 local easy = "easy"
 local normal = "normal"
 local hard = "hard"
 local impossible = "impossible"
-hsc.game_difficulty_get = function()
-    -- TODO Implement this by reading game actual difficulty
-    return normal
-end
-hsc.game_difficulty_get_real = hsc.game_difficulty_get
-hsc.print = function(message)
-    Engine.core.consolePrint("{}", tostring(message))
-end
----------- Finish HSC Header to Lua ----------
+
 ]]
 
 if args.module then
