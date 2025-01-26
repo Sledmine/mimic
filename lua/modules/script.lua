@@ -1,10 +1,21 @@
 local script = {}
 
 local engine = Engine
-
-local callTrace = {}
-
 local getTickCount = engine.core.getTickCount
+
+---@class ScriptThreadMetadata
+---@field isContinuous boolean
+
+---@class ScriptThread
+---@field thread thread
+---@field parent ScriptThread?
+---@field child ScriptThread?
+---@field isContinuous boolean
+---@field run fun(): boolean
+---@field func fun()
+
+---@type ScriptThread[]
+local callTrace = {}
 
 ---Sleeps for a certain amount of ticks or until a condition is met
 ---@overload fun(ticks: number)
@@ -23,146 +34,129 @@ local function waitFor(ticksOrCondition, everyTicksOrThread, maximumTicks)
             logger:warning("Causing another thread to sleep is not implemented yet!!!")
             return
         end
-        -- logger:warning("Sleeping for " .. ticksOrCondition .. " ticks")
+        logger:warning("Sleeping for " .. ticksOrCondition .. " ticks")
         local currentTicks = getTickCount()
-        while getTickCount() - currentTicks < ticks do
-            -- logger:debug("Sleeping...")
+        while ticks == -1 or getTickCount() - currentTicks < ticks do
             coroutine.yield()
         end
     end
     if sleepUntil then
-        -- logger:warning("Sleeping until condition is true")
+        logger:debug("Sleeping until condition is true")
         local currentTicks = getTickCount()
-        -- FIXME Maximum ticks does not seem to be working
-        -- It ignores sleepUntil and just sleeps for the maximumTicks
         -- while sleepUntil() ~= true or (maximumTicks and getTickCount() - currentTicks < maximumTicks) do
         while sleepUntil() ~= true do
-            -- logger:debug("Sleeping...")
             coroutine.yield()
         end
     end
-    coroutine.yield("_finished")
 end
 
---- Handles the result of a coroutine
----@param co thread
-local function handleThread(co, ...)
-    local ok, result = coroutine.resume(co, ...)
-    if not ok then
-        error(result, 2)
+---@param scriptThread ScriptThread
+local function addThreadToTrace(scriptThread)
+    table.insert(callTrace, scriptThread)
+end
+
+---@param scriptThread ScriptThread
+local function removeThreadFromTrace(scriptThread)
+    local scriptThreadIndex = table.indexof(callTrace, scriptThread)
+    logger:debug("Removing dead script {}.", scriptThreadIndex)
+    if scriptThread.parent then
+        scriptThread.parent.child = nil
     end
-    return ok, result
+    table.remove(callTrace, scriptThreadIndex)
+end
+
+--- Handle a script thread recursively
+--- If the script's thread is dead after resuming, remove it from the call trace and handle the parent thread.
+--- If the script is continuous and its thread is dead after resuming, restart the script.
+---@param script ScriptThread
+local function handleScriptThread(script, ...)
+    local threadResult
+    if not script.child then
+        threadResult = script.run()
+    else
+        local ok, result = coroutine.resume(script.thread, ...)
+        if not ok then
+            error(result, 2)
+        end 
+        threadResult = result
+    end
+
+    if coroutine.status(script.thread) == "dead" then
+        if script.isContinuous then
+            script.thread = coroutine.create(script.func)
+        else
+            removeThreadFromTrace(script)
+            if script.parent then
+                handleScriptThread(script.parent, threadResult)
+            end
+        end
+    end
 end
 
 function script.poll()
-    for parentThread, v in pairs(callTrace) do
-        local callThread = v[1]
-        local runThread = v[2]
-        local metadata = v[3] or {}
-
-        local isThreadAlive = coroutine.status(parentThread) ~= "dead"
-        local isWaitingForAnotherThread = callThread and callTrace[callThread]
-        if isThreadAlive and not isWaitingForAnotherThread then
-            local isThreadOk, threadResult = runThread()
-
-            -- Something went wrong when running thread
-            if not isThreadOk then
-                error(threadResult)
+    for _, currentScript in ipairs(callTrace) do
+        if not currentScript.child then
+            if coroutine.status(currentScript.thread) ~= "dead" then
+                handleScriptThread(currentScript)
             end
-
-            -- Thread ran!
-            if isThreadOk then
-                if isThreadResult then
-                    if threadResult == "_finished" then
-                        handleThread(parentThread)
-                    else
-                        handleThread(parentThread, threadResult)
-                    end
-                end
-            end
-        end
-
-        local isCalledThreadAlive = coroutine.status(callThread) ~= "dead"
-        if isCalledThreadAlive and not isWaitingForAnotherThread then
-            local isCallOk, callResult = (runThread or coroutine.resume)(callThread)
-            local isCallDead = coroutine.status(callThread) == "dead"
-            -- logger:info("Routine: {} is {}, result: {}", tostring(co), coroutine.status(co), tostring(callResult))
-            if not isCallOk then
-                error(callResult)
-            end
-            if isCallOk then
-                if callResult then
-                    if callResult == "_finished" then
-                        -- logger:debug("Call finished sleeping")
-                        handleThread(parentThread)
-                        -- callTrace[ref] = nil
-                    else
-                        logger:info("Call returned: " .. tostring(callResult))
-                        handleThread(parentThread, callResult)
-                        -- callTrace[ref] = nil
-                    end
-                end
-                if not callResult and isCallDead then
-                    logger:warning("Call is dead")
-                    -- TODO Verify this is a valid case
-                    -- So far this happens when invoking a non parented call, like when using wake
-                    local parentIsAlive = coroutine.status(parentThread) ~= "dead"
-                    if parentIsAlive then
-                        handleThread(parentThread)
-                    end
-                end
-            end
-        end
-        if not isCalledThreadAlive then
-            logger:warning("Call {} is dead, removing parent thread...", tostring(callThread))
-            callTrace[parentThread] = nil
         end
     end
     return #callTrace
 end
 
-local function addThreadToTrace(parent, callThread, run, ...)
-    callTrace[parent] = {callThread, run, ...}
-end
-
 function script.thread(func, metadata)
     local metadata = metadata or {}
-    local parentThread = coroutine.create(func)
+    local parentScriptThread = {
+        parent = nil,
+        child = nil,
+        func = func,
+        thread = coroutine.create(func),
+        isContinuous = metadata.isContinuous
+    }
+    addThreadToTrace(parentScriptThread)
 
     local call = function(funcToCall)
-        local run, callThread = script.thread(funcToCall)
-        addThreadToTrace(parentThread, callThread, run)
+        local parent = parentScriptThread
+        if parent.child then
+            logger:warning("Tried to call a function while another is running")
+        end
+        local _, callScriptThread = script.thread(funcToCall)
+        callScriptThread.parent = parent
+        parent.child = callScriptThread
         return coroutine.yield()
     end
 
     local sleep = function(...)
-        local args = {...}
-        local run, callThread = script.thread(function()
+        local sleepArgs = {...}
+        print(table.unpack(sleepArgs))
+        call(function()
+            local args = sleepArgs
             waitFor(table.unpack(args))
         end)
-        addThreadToTrace(parentThread, callThread, run)
-        return coroutine.yield()
     end
 
     local run = function()
-        return coroutine.resume(parentThread, call, sleep)
+        local scriptThread = parentScriptThread
+        local ok, result = coroutine.resume(scriptThread.thread, call, sleep)
+        if not ok then
+            error(result, 2)
+        end
+        return result
     end
 
-    addThreadToTrace(parentThread, nil, run, metadata)
+    parentScriptThread.run = run
 
-    return run, parentThread
+    return run, parentScriptThread
 end
 
 function script.startup(func)
-    return script.thread(func, {isStartup = true})()
+    return script.thread(func)()
 end
 
 function script.continuous(func)
-    -- local run, ref = script.thread(func)
-    -- local metadata = {isContinuous = true}
-    -- addThreadToTrace(ref, ref, run, metadata)
-    -- return run, ref
-    logger:warning("Continuous script is not implemented yet!!!")
+    local metadata = {isContinuous = true}
+    local run, ref = script.thread(func, metadata)
+    return run, ref
 end
 
 function script.wake(func)
