@@ -126,6 +126,10 @@ function script.thread(func, ...)
     return run, ref
 end
 
+function script.startup(func)
+    return script.thread(func)()
+end
+
 function script.continuous(func)
     --local run, ref = script.thread(func)
     --local metadata = {isContinuous = true}
