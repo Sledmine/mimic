@@ -96,9 +96,7 @@ end
 function script.poll()
     for _, currentScript in ipairs(callTrace) do
         if not currentScript.child then
-            if coroutine.status(currentScript.thread) ~= "dead" then
-                handleScriptThread(currentScript)
-            end
+            handleScriptThread(currentScript)
         end
     end
     return #callTrace
