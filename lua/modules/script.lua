@@ -4,51 +4,20 @@ local engine = Engine
 local getTickCount = engine.core.getTickCount
 
 ---@class ScriptThreadMetadata
----@field isContinuous boolean
+---@field type "startup"|"continuous"|"dormant"
 
 ---@class ScriptThread
 ---@field thread thread
 ---@field parent ScriptThread?
 ---@field child ScriptThread?
----@field isContinuous boolean
+---@field type "startup"|"continuous"|"dormant"
+---@field isDormant boolean
+---@field isSleep boolean
 ---@field run fun(): boolean
 ---@field func fun()
 
 ---@type ScriptThread[]
 local callTrace = {}
-
----Sleeps for a certain amount of ticks or until a condition is met
----@overload fun(ticks: number)
----@overload fun(ticks: number, script: thread)
----@overload fun(sleepUntil: fun(): boolean)
----@overload fun(ticks: number, everyTicks?: number, maximumTicks?: number)
----@param ticksOrCondition number | fun(): boolean
----@param everyTicksOrThread? number
----@param maximumTicks? number
-local function waitFor(ticksOrCondition, everyTicksOrThread, maximumTicks)
-    local ticks = type(ticksOrCondition) == "number" and ticksOrCondition or nil
-    local sleepUntil = type(ticksOrCondition) == "function" and ticksOrCondition or nil
-    local threadToSleep = type(everyTicksOrThread) == "thread" and ticks or nil
-    if ticks then
-        if threadToSleep then
-            logger:warning("Causing another thread to sleep is not implemented yet!!!")
-            return
-        end
-        logger:warning("Sleeping for " .. ticksOrCondition .. " ticks")
-        local currentTicks = getTickCount()
-        while ticks == -1 or getTickCount() - currentTicks < ticks do
-            coroutine.yield()
-        end
-    end
-    if sleepUntil then
-        logger:debug("Sleeping until condition is true")
-        local currentTicks = getTickCount()
-        -- while sleepUntil() ~= true or (maximumTicks and getTickCount() - currentTicks < maximumTicks) do
-        while sleepUntil() ~= true do
-            coroutine.yield()
-        end
-    end
-end
 
 ---@param scriptThread ScriptThread
 local function addThreadToTrace(scriptThread)
@@ -63,6 +32,29 @@ local function removeThreadFromTrace(scriptThread)
         scriptThread.parent.child = nil
     end
     table.remove(callTrace, scriptThreadIndex)
+end
+
+---@param ticks number
+local function sleepThreadFor(ticks)
+    if ticks == -1 then
+        logger:warning("Sleeping until woken up")
+    else
+        logger:warning("Sleeping for " .. ticks .. " ticks")
+    end
+    local currentTicks = getTickCount()
+    while ticks == -1 or getTickCount() - currentTicks < ticks do
+        coroutine.yield()
+    end
+end
+
+---@param evaluateCondition fun(): boolean
+---@param maximumTicks? number
+local function sleepThreadUntil(evaluateCondition, maximumTicks)
+    logger:debug("Sleeping until condition is true")
+    local currentTicks = getTickCount()
+    while evaluateCondition() ~= true or (maximumTicks and getTickCount() - currentTicks < maximumTicks) do
+        coroutine.yield()
+    end
 end
 
 --- Handle a script thread recursively
@@ -82,7 +74,7 @@ local function handleScriptThread(script, ...)
     end
 
     if coroutine.status(script.thread) == "dead" then
-        if script.isContinuous then
+        if script.type == "continuous" then
             script.thread = coroutine.create(script.func)
         else
             removeThreadFromTrace(script)
@@ -93,44 +85,75 @@ local function handleScriptThread(script, ...)
     end
 end
 
+local function findScriptThreadByFunc(func)
+    for _, scriptThread in ipairs(callTrace) do
+        if scriptThread.func == func then
+            return scriptThread
+        end
+    end
+    return nil
+end
+
+local function getBottomMostScriptChild(scriptThread)
+    local currentScriptThread = scriptThread
+    while currentScriptThread.child do
+        currentScriptThread = currentScriptThread.child
+    end
+    return currentScriptThread
+end
+
 function script.poll()
     for _, currentScript in ipairs(callTrace) do
-        if not currentScript.child then
+        if not currentScript.child and not currentScript.isDormant then
             handleScriptThread(currentScript)
         end
     end
     return #callTrace
 end
 
+---@param func fun(call: fun(func: fun()), sleep: fun(...))
+---@param metadata? ScriptThreadMetadata
 function script.thread(func, metadata)
     local metadata = metadata or {}
     local parentScriptThread = {
-        parent = nil,
-        child = nil,
         func = func,
         thread = coroutine.create(func),
-        isContinuous = metadata.isContinuous
+        parent = nil,
+        child = nil,
+        type = metadata.type,
+        isDormant = metadata.type == "dormant",
+        isSleep = false
     }
     addThreadToTrace(parentScriptThread)
 
     local call = function(funcToCall)
-        local parent = parentScriptThread
-        if parent.child then
-            logger:warning("Tried to call a function while another is running")
+        if parentScriptThread.child then
+            error("Cannot call a function while another function is being called", 2)
         end
         local _, callScriptThread = script.thread(funcToCall)
-        callScriptThread.parent = parent
-        parent.child = callScriptThread
+        callScriptThread.parent = parentScriptThread
+        parentScriptThread.child = callScriptThread
         return coroutine.yield()
     end
 
     local sleep = function(...)
-        local sleepArgs = {...}
-        print(table.unpack(sleepArgs))
-        call(function()
-            local args = sleepArgs
-            waitFor(table.unpack(args))
+        if parentScriptThread.child then
+            error("Cannot sleep while another function is being called", 2)
+        end
+        local args = {...}
+        local _, callScriptThread = script.thread(function()
+            if #args == 1 and type(args[1]) == "number" then
+                sleepThreadFor(args[1])
+            elseif #args == 1 and type(args[1]) == "function" then
+                sleepThreadUntil(args[1], args[2] or nil)
+            else 
+                error("Invalid sleep arguments")
+            end
         end)
+        callScriptThread.isSleep = true
+        callScriptThread.parent = parentScriptThread
+        parentScriptThread.child = callScriptThread
+        return coroutine.yield()
     end
 
     local run = function()
@@ -148,20 +171,50 @@ function script.thread(func, metadata)
 end
 
 function script.startup(func)
-    return script.thread(func)()
+    local foundScript = findScriptThreadByFunc(func)
+    if foundScript then
+        logger:error("Tried to add a script that already exists.")
+        return
+    end
+    local metadata = {type = "startup"}
+    return script.thread(func, metadata)()
 end
 
 function script.continuous(func)
-    local metadata = {isContinuous = true}
+    local foundScript = findScriptThreadByFunc(func)
+    if foundScript then
+        logger:error("Tried to add a script that already exists.")
+        return
+    end
+    local metadata = {type = "continuous"}
     local run, ref = script.thread(func, metadata)
     return run, ref
 end
 
+function script.dormant(func)
+    local foundScript = findScriptThreadByFunc(func)
+    if foundScript then
+        logger:error("Tried to add a script that already exists.")
+        return
+    end
+    local metadata = {type = "dormant"}
+    script.thread(func, metadata)
+end
+
 function script.wake(func)
-    script.thread(function(call, sleep)
-        sleep(1)
-        call(func)
-    end)()
+    local foundScript = findScriptThreadByFunc(func)
+    if not foundScript then
+        logger:error("Tried to wake a script that does not exist.")
+        return
+    end
+    if foundScript.isDormant then
+        foundScript.isDormant = false
+    else
+        local child = getBottomMostScriptChild(foundScript)
+        if child.isSleep then
+            removeThreadFromTrace(child)
+        end
+    end
 end
 
 return script
