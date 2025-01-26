@@ -154,10 +154,15 @@ local function convertAstToLua(astNode)
             lua = lua .. varName .. " = " .. tostring(varValue) .. "\n"
         elseif name == "not" then
             local varValue = hscArgs[1]
+            local hasSubExpression = type(varValue) == "table"
             if type(varValue) == "table" then
                 varValue = convertAstToLua(varValue)
             end
-            lua = lua .. "not " .. varValue .. "\n"
+            if hasSubExpression then
+                lua = lua .. "not (" .. varValue .. ")"
+            else
+                lua = lua .. "not " .. varValue
+            end
         elseif name == "=" then
             local var1 = hscArgs[1]
             local var2 = hscArgs[2]
@@ -167,7 +172,7 @@ local function convertAstToLua(astNode)
             if type(var2) == "table" then
                 var2 = convertAstToLua(var2)
             end
-            lua = lua .. tostring(var2) .. " == " .. tostring(var1) .. ""
+            lua = lua .. tostring(var1) .. " == " .. tostring(var2) .. "\n"
         elseif name == "if" then
             local condition = hscArgs[1]
             local body = hscArgs[2]
@@ -325,6 +330,13 @@ local function convertAstToLua(astNode)
                     lua = lua .. "script.continuous(" .. scriptName .. ")\n"
                 end
             end
+            if scriptType == "startup" then
+                if args.module then
+                    lua = lua .. "script.startup(" .. args.module .. "." .. scriptName .. ")\n"
+                else
+                    lua = lua .. "script.startup(" .. scriptName .. ")\n"
+                end
+            end
             lua = lua .. "\n"
         elseif name == "wake" then
             local scriptName = hscArgs[1]
@@ -440,7 +452,7 @@ end
 
 local lua = convertAstToLua(hsc)
 local header = [[---------- Transpiled from HSC to Lua ----------
-local script = require"script".call
+local script = require "script"
 local wake = require"script".wake
 local hsc = require "hsc"
 local easy = "easy"
