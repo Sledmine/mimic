@@ -44,7 +44,9 @@ local function waitFor(ticksOrCondition, everyTicksOrThread, maximumTicks)
     coroutine.yield("_finished")
 end
 
-local function handleCoroutine(co, ...)
+--- Handles the result of a coroutine
+---@param co thread
+local function handleThread(co, ...)
     local ok, result = coroutine.resume(co, ...)
     if not ok then
         error(result, 2)
@@ -52,15 +54,37 @@ local function handleCoroutine(co, ...)
     return ok, result
 end
 
-function script.dispatch()
-    for ref, v in pairs(callTrace) do
+function script.poll()
+    for parentThread, v in pairs(callTrace) do
         local callThread = v[1]
-        local run = v[2]
+        local runThread = v[2]
         local metadata = v[3] or {}
-        local isCallAlive = coroutine.status(callThread) ~= "dead"
-        local isWaitingForOtherCoroutine = callTrace[callThread]
-        if isCallAlive and not isWaitingForOtherCoroutine then
-            local isCallOk, callResult = (run or coroutine.resume)(callThread)
+
+        local isThreadAlive = coroutine.status(parentThread) ~= "dead"
+        local isWaitingForAnotherThread = callThread and callTrace[callThread]
+        if isThreadAlive and not isWaitingForAnotherThread then
+            local isThreadOk, threadResult = runThread()
+
+            -- Something went wrong when running thread
+            if not isThreadOk then
+                error(threadResult)
+            end
+
+            -- Thread ran!
+            if isThreadOk then
+                if isThreadResult then
+                    if threadResult == "_finished" then
+                        handleThread(parentThread)
+                    else
+                        handleThread(parentThread, threadResult)
+                    end
+                end
+            end
+        end
+
+        local isCalledThreadAlive = coroutine.status(callThread) ~= "dead"
+        if isCalledThreadAlive and not isWaitingForAnotherThread then
+            local isCallOk, callResult = (runThread or coroutine.resume)(callThread)
             local isCallDead = coroutine.status(callThread) == "dead"
             -- logger:info("Routine: {} is {}, result: {}", tostring(co), coroutine.status(co), tostring(callResult))
             if not isCallOk then
@@ -70,11 +94,11 @@ function script.dispatch()
                 if callResult then
                     if callResult == "_finished" then
                         -- logger:debug("Call finished sleeping")
-                        handleCoroutine(ref)
+                        handleThread(parentThread)
                         -- callTrace[ref] = nil
                     else
                         logger:info("Call returned: " .. tostring(callResult))
-                        handleCoroutine(ref, callResult)
+                        handleThread(parentThread, callResult)
                         -- callTrace[ref] = nil
                     end
                 end
@@ -82,32 +106,32 @@ function script.dispatch()
                     logger:warning("Call is dead")
                     -- TODO Verify this is a valid case
                     -- So far this happens when invoking a non parented call, like when using wake
-                    local parentIsAlive = coroutine.status(ref) ~= "dead"
+                    local parentIsAlive = coroutine.status(parentThread) ~= "dead"
                     if parentIsAlive then
-                        handleCoroutine(ref)
+                        handleThread(parentThread)
                     end
                 end
             end
         end
-        if not isCallAlive then
+        if not isCalledThreadAlive then
             logger:warning("Call {} is dead, removing parent thread...", tostring(callThread))
-            callTrace[ref] = nil
+            callTrace[parentThread] = nil
         end
     end
     return #callTrace
 end
 
-local function addThreadToTrace(ref, callThread, run, ...)
-    callTrace[ref] = {callThread, run, ...}
+local function addThreadToTrace(parent, callThread, run, ...)
+    callTrace[parent] = {callThread, run, ...}
 end
 
-function script.thread(func, ...)
-    -- local currentRefFuncName = debug.getlocal(1, 1)
-    local ref = coroutine.create(func)
+function script.thread(func, metadata)
+    local metadata = metadata or {}
+    local parentThread = coroutine.create(func)
 
     local call = function(funcToCall)
         local run, callThread = script.thread(funcToCall)
-        addThreadToTrace(ref, callThread, run)
+        addThreadToTrace(parentThread, callThread, run)
         return coroutine.yield()
     end
 
@@ -116,25 +140,28 @@ function script.thread(func, ...)
         local run, callThread = script.thread(function()
             waitFor(table.unpack(args))
         end)
-        addThreadToTrace(ref, callThread, run)
+        addThreadToTrace(parentThread, callThread, run)
         return coroutine.yield()
     end
 
     local run = function()
-        return coroutine.resume(ref, call, sleep)
+        return coroutine.resume(parentThread, call, sleep)
     end
-    return run, ref
+
+    addThreadToTrace(parentThread, nil, run, metadata)
+
+    return run, parentThread
 end
 
 function script.startup(func)
-    return script.thread(func)()
+    return script.thread(func, {isStartup = true})()
 end
 
 function script.continuous(func)
-    --local run, ref = script.thread(func)
-    --local metadata = {isContinuous = true}
-    --addThreadToTrace(ref, ref, run, metadata)
-    --return run, ref
+    -- local run, ref = script.thread(func)
+    -- local metadata = {isContinuous = true}
+    -- addThreadToTrace(ref, ref, run, metadata)
+    -- return run, ref
     logger:warning("Continuous script is not implemented yet!!!")
 end
 
