@@ -34,11 +34,12 @@ local V = lpeg.V -- variable
 local inspect = require "lua.modules.inspect"
 local luna = require "lua.modules.luna"
 local argparse = require "lua.scripts.modules.argparse"
+local hscDoc = require "lua.modules.hscDoc"
 
 local parser = argparse("hscToLua", "Transpiler for HSC (Halo Script Language) to Lua")
 parser:argument("input", "Input HSC file to transpile")
 parser:option("-o --output", "Output Lua file to save the transpiled code", "output.lua")
-parser:option("--debug", "Enable debug mode", false)
+parser:flag("--debug", "Enable debug mode")
 parser:option("--module", "Write script as a module with a given name")
 
 local args = parser:parse()
@@ -47,7 +48,7 @@ local parser = P {
     "program", -- initial rule
     program = Ct(V "sexpr" ^ 0),
     wspace = S " \n\r\t" ^ 0,
-    atom = V "boolean" + V "integer" + V "string" + V "symbol",
+    atom = V "boolean" + V "number" + V "string" + V "symbol",
     symbol = C((1 - S " \n\r\t\"'()[]{}#@~") ^ 1) / function(s)
         if s:includes("/") then
             return "str_" .. s
@@ -57,7 +58,7 @@ local parser = P {
     boolean = C(P "true" + P "false") / function(x)
         return x == "true"
     end,
-    integer = C(R "19" * R "09" ^ 0) / tonumber,
+    number = C(R "19" * R "09" ^ 0 * (P "." * R "09" ^ 1) ^ -1) / tonumber,
     string = P "\"" * C((1 - S "\"\n\r") ^ 0) * P "\"" / function(s)
         return "str_" .. s
     end,
@@ -114,9 +115,20 @@ local userDefinedFunctions = {}
 local function escapeStringValue(value)
     local str = value
     str = str:replace("\\", "\\\\")
-    str = "\"" .. str .. "\""
+    if not str:startswith("\"") and not str:endswith("\"") then
+        str = "\"" .. str .. "\""
+    end
     return str
 end
+
+local function convertToString(value)
+    if value:startswith("str_") or value:includes("\\") then
+        return value:replace("str_", "")
+    end
+    return value
+end
+
+local nativeTypes = {"boolean", "short", "long", "real"}
 
 local function convertAstToLua(astNode)
     local lua = ""
@@ -133,7 +145,13 @@ local function convertAstToLua(astNode)
             if type(varValue) == "table" then
                 varValue = convertAstToLua(varValue)
             end
-            variables[varName] = true
+            if not table.keyof(nativeTypes, varType) then
+                varValue = escapeStringValue(varValue)
+            end
+            if varType == "boolean" then
+                varValue = luna.bool(varValue)
+            end
+            variables[varName] = varType
             lua = lua .. "local " .. varName .. " = " .. tostring(varValue) .. "\n"
         elseif name == "*" then
             local var1 = hscArgs[1]
@@ -150,6 +168,9 @@ local function convertAstToLua(astNode)
             local varValue = hscArgs[2]
             if type(varValue) == "table" then
                 varValue = convertAstToLua(varValue)
+            end
+            if variables[varName] == "boolean" then
+                varValue = luna.bool(varValue)
             end
             lua = lua .. varName .. " = " .. tostring(varValue) .. "\n"
         elseif name == "not" then
@@ -287,6 +308,26 @@ local function convertAstToLua(astNode)
                 var2 = convertAstToLua(var2)
             end
             lua = lua .. var1 .. " > " .. var2 .. "\n"
+        elseif name == "<=" then
+            local var1 = hscArgs[1]
+            local var2 = hscArgs[2]
+            if type(var1) == "table" then
+                var1 = convertAstToLua(var1)
+            end
+            if type(var2) == "table" then
+                var2 = convertAstToLua(var2)
+            end
+            lua = lua .. var1 .. " <= " .. var2 .. "\n"
+        elseif name == ">=" then
+            local var1 = hscArgs[1]
+            local var2 = hscArgs[2]
+            if type(var1) == "table" then
+                var1 = convertAstToLua(var1)
+            end
+            if type(var2) == "table" then
+                var2 = convertAstToLua(var2)
+            end
+            lua = lua .. var1 .. " >= " .. var2 .. "\n"
         elseif name == "!=" then
             local var1 = hscArgs[1]
             local var2 = hscArgs[2]
@@ -392,8 +433,21 @@ local function convertAstToLua(astNode)
             end
             for index, arg in ipairs(hscArgs) do
                 -- Argument is a string value (not a symbol cause it starts with "str_")
-                if type(arg) == "string" and arg:startswith("str_") then
-                    hscArgs[index] = escapeStringValue(arg:replace("str_", ""))
+                if type(arg) == "string" then
+                    local argMetadata = table.find(hscDoc, function(doc)
+                        return doc.funcName:trim() == name:trim()
+                    end)
+                    if argMetadata then
+                        local argType = argMetadata.args[index]
+                        if not table.indexof(nativeTypes, argType) and not arg:includes("(") and
+                            not arg:includes(")") and not variables[arg] then
+                            hscArgs[index] = escapeStringValue(arg:replace("str_", ""))
+                        else
+                            hscArgs[index] = convertToString(arg)
+                        end
+                    else
+                        hscArgs[index] = convertToString(arg)
+                    end
                 elseif type(arg) == "boolean" then
                     hscArgs[index] = tostring(arg)
                 elseif type(arg) == "string" then
