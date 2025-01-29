@@ -9,13 +9,11 @@ api_version = "1.12.0.0"
 -- Bring compatibility with Lua 5.3
 require "compat53"
 print("Compatibility with Lua 5.3 has been loaded!")
+local blam = require "blam"
+console_out = cprint
 
--- External DLL libraries
-local ffi = require "ffi"
-ffi.cdef [[
-void set_hs_globals_set_callback(void (*callback)(void));
-]]
-local harmonySapp = ffi.load("./harmony_s.dll")
+-- Bring compatibility with Balltze
+require "balltzeCompat"
 
 -- Lua modules
 local luna = require "luna"
@@ -23,7 +21,6 @@ local split = string.split
 local startswith = string.startswith
 
 -- Halo Custom Edition modules
-local blam = require "blam"
 local isNull = blam.isNull
 local objectClasses = blam.objectClasses
 local tagClasses = blam.tagClasses
@@ -31,9 +28,11 @@ local core = require "mimic.core"
 local toSentenceCase = core.toSentenceCase
 local constants = require "mimic.constants"
 local version = require "mimic.version"
+local script = require "script"
+local hsc = require "hsc"
 
 -- Settings
-DebugMode = false
+DebugMode = true
 local bspIndexAddress = 0x40002CD8
 local passwordAddress
 local failMessageAddress
@@ -46,6 +45,8 @@ local deviceMachinesList = {}
 LastSyncCommand = ""
 local currentBspIndex
 local currentScenario = nil
+
+logger = Balltze.logger.createLogger("Mimic Server")
 
 ---Log to console
 ---@param type "info" | "error" | "warning" | "debug"
@@ -82,18 +83,13 @@ function Send(playerIndex, message)
     return false
 end
 
-function SyncHSC(_, hscMimicCommand)
-    if hscMimicCommand ~= "nd" and LastSyncCommand ~= hscMimicCommand then
-        LastSyncCommand = hscMimicCommand
-        local syncCommand = core.adaptHSC(hscMimicCommand)
-        if syncCommand then
-            log("debug", "Sync command: " .. syncCommand)
-            Broadcast(syncCommand)
-        end
-        -- Uncommenting this probably will be required for very specific hsc specific script cases
-        -- execute_command("set sync_hsc_command \"\"")
+hsc.addMiddleWare(function(functionName, args)
+    local hscPacket = core.hscPacket(functionName, args)
+    if hscPacket then
+        log("debug", "HSC Packet: " .. hscPacket)
+        Broadcast(hscPacket)
     end
-end
+end)
 
 function SyncGameState(playerIndex)
     for objectId, group in pairs(deviceMachinesList) do
@@ -311,6 +307,18 @@ function OnGameStart()
     if DebugMode then
         set_timer(5000, "ShowCurrentSyncedObjects")
     end
+
+    hsc.print("Test hsc!!!!!!!!!!!!!!!!!")
+    hsc.game_difficulty_set("hard")
+    logger:debug("Return value: {}", hsc.volume_test_objects("motiontracker_4", "player0"))
+    hsc.device_set_position("tunnel_door_3", 0)
+
+    logger:debug("Return value: {}", hsc.device_get_position("tunnel_door_3"))
+    hsc.fade_in(1, 1, 1, 1)
+    hsc.object_create("cafeteria_door_1")
+    hsc.effect_new("cinematics\\effects\\cortana effects\\cortana on off", "x10_cortana_effect")
+    local _ = require("a10")
+
     log("info", "Mimic version: " .. version)
     currentScenario = blam.scenario(0)
     assert(currentScenario, "No current scenario tag found")
@@ -323,6 +331,7 @@ function OnGameStart()
 end
 
 function OnTick()
+    script.poll()
     -- Check for BSP Changes
     local bspIndex = read_byte(bspIndexAddress)
     if bspIndex ~= currentBspIndex then
@@ -451,10 +460,6 @@ function OnScriptLoad()
         cprint("Error, at obtaining rcon patches, please check SAPP version.")
     end
     ResetState()
-    -- Set hsc callback to follow actions requesting synchronization
-    harmonySapp.set_hs_globals_set_callback(function()
-        execute_command("inspect sync_hsc_command", 0, true)
-    end)
 
     -- Set server callback
     register_callback(cb["EVENT_GAME_START"], "OnGameStart")
@@ -464,7 +469,6 @@ function OnScriptLoad()
     register_callback(cb["EVENT_LEAVE"], "OnPlayerLeave")
     register_callback(cb["EVENT_TICK"], "OnTick")
     register_callback(cb["EVENT_DIE"], "OnPlayerDead")
-    register_callback(cb["EVENT_ECHO"], "SyncHSC")
     register_callback(cb["EVENT_COMMAND"], "OnCommand")
 end
 

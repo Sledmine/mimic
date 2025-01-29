@@ -1,5 +1,7 @@
 local glue = require "glue"
 local luna = require "luna"
+local hscDoc = require "hscDoc"
+local inspect= require "inspect"
 local split = luna.string.split
 local tohex = glue.string.tohex
 local fromhex = glue.string.fromhex
@@ -18,8 +20,6 @@ local concat = table.concat
 local blam = require "blam"
 local isNull = blam.isNull
 local color = require "ncolor"
-
-local hsc = require "mimic.hsc"
 
 local core = {}
 local packetSeparator = ","
@@ -103,6 +103,127 @@ function core.updateObjectPacket(syncedIndex, object)
         packet[4] = encode("f", absolute.y)
         packet[5] = encode("f", absolute.z)
     end
+    return concat(packet, packetSeparator)
+end
+
+local snakeCaseTagClasses = {
+    actor_variant = "actv",
+    actor = "actr",
+    antenna = "ant!",
+    biped = "bipd",
+    bitmap = "bitm",
+    camera_track = "trak",
+    color_table = "colo",
+    continuous_damage_effect = "cdmg",
+    contrail = "cont",
+    damage_effect = "jpt!",
+    decal = "deca",
+    detail_object_collection = "dobc",
+    device_control = "ctrl",
+    device_light_fixture = "lifi",
+    device_machine = "mach",
+    device = "devi",
+    dialogue = "udlg",
+    effect = "effe",
+    equipment = "eqip",
+    flag = "flag",
+    fog = "fog ",
+    font = "font",
+    garbage = "garb",
+    gbxmodel = "mod2",
+    globals = "matg",
+    glow = "glw!",
+    grenade_hud_interface = "grhi",
+    hud_globals = "hudg",
+    hud_message_text = "hmt ",
+    hud_number = "hud#",
+    item_collection = "itmc",
+    item = "item",
+    lens_flare = "lens",
+    light_volume = "mgs2",
+    light = "ligh",
+    lightning = "elec",
+    material_effects = "foot",
+    meter = "metr",
+    model_animations = "antr",
+    model_collision_geometry = "coll",
+    model = "mode",
+    multiplayer_scenario_description = "mply",
+    object = "obje",
+    particle_system = "pctl",
+    particle = "part",
+    physics = "phys",
+    placeholder = "plac",
+    point_physics = "pphy",
+    preferences_network_game = "ngpr",
+    projectile = "proj",
+    scenario_structure_bsp = "sbsp",
+    scenario = "scnr",
+    scenery = "scen",
+    shader_environment = "senv",
+    shader_model = "soso",
+    shader_transparent_chicago_extended = "scex",
+    shader_transparent_chicago = "schi",
+    shader_transparent_generic = "sotr",
+    shader_transparent_glass = "sgla",
+    shader_transparent_meter = "smet",
+    shader_transparent_plasma = "spla",
+    shader_transparent_water = "swat",
+    shader = "shdr",
+    sky = "sky ",
+    sound_environment = "snde",
+    sound_looping = "lsnd",
+    sound_scenery = "ssce",
+    sound = "snd!",
+    spheroid = "boom",
+    string_list = "str#",
+    tag_collection = "tagc",
+    ui_widget_collection = "Soul",
+    ui_widget_definition = "DeLa",
+    unicode_string_list = "ustr",
+    unit_hud_interface = "unhi",
+    unit = "unit",
+    vehicle = "vehi",
+    virtual_keyboard = "vcky",
+    weapon_hud_interface = "wphi",
+    weapon = "weap",
+    weather_particle_system = "rain",
+    wind = "wind"
+}
+
+--- Create a packet string for an hsc function invocation
+---@param functionName string
+---@param args string[]
+---@return string
+function core.hscPacket(functionName, args)
+    local funcMeta = table.find(hscDoc.functions, function (v, k)
+        return v.funcName == functionName
+    end)
+    if not funcMeta then
+        error("Function " .. functionName .. " not found in hscDoc")
+    end
+    --print(inspect(args))
+    local args = table.map(args, function (v, i)
+        local argType = funcMeta.args[i]
+        if not table.indexof(hscDoc.nativeTypes, argType) then
+            --logger:debug("Checking if value: {} of type {} is a tag", v, argType)
+            local isTag = snakeCaseTagClasses[argType]
+            if isTag then
+                v = v:gsub("\"", "")
+                logger:warning("Value: {} is a tag, converting to tag handle!", v)
+                local tagEntry = blam.getTag(v, argType)
+                assert(tagEntry, "Failed to get tag entry for " .. v)
+                return tagEntry.id
+            end
+        end
+        return v
+    end)
+
+    local packet = {
+        "@" .. funcMeta.hash,
+        table.unpack(args)
+    }
+
     return concat(packet, packetSeparator)
 end
 
