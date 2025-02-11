@@ -330,6 +330,16 @@ local function processPacket(message, packetType, packet)
                 --end
             end
             engine.hsc.executeScript(hscCommand)
+            if hscCommand:includes("camera_set") then
+                local params = hscCommand:split " "
+                local cutsceneCameraPoint = params[2]
+                if DebugMode then
+                    if DebugLevel >= 2 then
+                        logger:debug("Unlocking cinematic camera: {}", cutsceneCameraPoint)
+                    end
+                end
+                engine.hsc.executeScript("object_pvs_set_camera " .. cutsceneCameraPoint)
+            end
         end
     end
     -- dprint("Packet processed, elapsed time: %.6f\n", os.time() - time)
