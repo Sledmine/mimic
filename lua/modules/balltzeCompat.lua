@@ -88,3 +88,8 @@ end
 function Engine.hsc.executeScript(script)
     execute_script(script)
 end
+
+---@diagnostic disable-next-line: duplicate-set-field
+function Engine.core.getTickCount()
+    return get_var(0, "$ticks")
+end

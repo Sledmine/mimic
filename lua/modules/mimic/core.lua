@@ -1,7 +1,7 @@
 local glue = require "glue"
 local luna = require "luna"
 local hscDoc = require "hscDoc"
-local inspect= require "inspect"
+local inspect = require "inspect"
 local split = luna.string.split
 local tohex = glue.string.tohex
 local fromhex = glue.string.fromhex
@@ -13,7 +13,6 @@ local starts = luna.string.startswith
 local sqrt = math.sqrt
 local abs = math.abs
 local floor = math.floor
-local memoize = require "memoize"
 local strpack = string.pack
 local strunpack = string.unpack
 local concat = table.concat
@@ -22,21 +21,18 @@ local isNull = blam.isNull
 local color = require "ncolor"
 
 local core = {}
+local packetPrefix = "@"
 local packetSeparator = ","
 
-local function encodeU(format, value)
-    -- TODO We might want to memoize this to improve performance
+function core.encode(format, value)
     return tohex(strpack(format, value))
 end
-local encode = memoize(encodeU)
-core.encode = encode
+local encode = core.encode
 
-local function decodeU(format, value)
-    -- TODO We might want to memoize this to improve performance
+function core.decode(format, value)
     return strunpack(format, fromhex(value))
 end
-local decode = memoize(decodeU)
-core.decode = decode
+local decode = core.decode
 
 --- Create an object color packet string
 ---@param syncedIndex number
@@ -44,7 +40,7 @@ core.decode = decode
 ---@return string
 function core.objectColorPacket(syncedIndex, object)
     local packet = concat({
-        "@c",
+        packetPrefix .. "c",
         syncedIndex,
         color.decToHex(object.colorAUpperRed, object.colorAUpperGreen, object.colorAUpperBlue),
         color.decToHex(object.colorBUpperRed, object.colorBUpperGreen, object.colorBUpperBlue),
@@ -64,7 +60,7 @@ end
 function core.updateObjectPacketNoParent(syncedIndex, object)
     local yaw, pitch, roll = blam.getObjectRotation(object)
     return concat({
-        "@u",
+        packetPrefix .. "u",
         syncedIndex,
         encode("f", object.x),
         encode("f", object.y),
@@ -84,7 +80,7 @@ end
 function core.updateObjectPacket(syncedIndex, object)
     local yaw, pitch, roll = blam.getObjectRotation(object)
     local packet = {
-        "@u",
+        packetPrefix .. "u",
         syncedIndex,
         encode("f", object.x),
         encode("f", object.y),
@@ -172,7 +168,7 @@ local snakeCaseTagClasses = {
     shader = "shdr",
     sky = "sky ",
     sound_environment = "snde",
-    sound_looping = "lsnd",
+    looping_sound = "lsnd",
     sound_scenery = "ssce",
     sound = "snd!",
     spheroid = "boom",
@@ -191,40 +187,101 @@ local snakeCaseTagClasses = {
     wind = "wind"
 }
 
+local function getObjectIndexByName(objectName)
+    local scenario = blam.scenario(0)
+    assert(scenario, "Failed to load scenario tag")
+    local objectIndex = table.indexof(scenario.objectNames, objectName)
+    if objectIndex then
+        logger:warning("Value: {} is an object, converting to object index!", objectName)
+        return objectIndex
+    end
+end
+
+local function getArgType(funcMeta, argIndex)
+    local argType = funcMeta.args[argIndex]
+    if table.indexof(hscDoc.nativeTypes, argType) then
+        return argType
+    end
+    if argType == "object" or argType == "vehicle" or argType == "biped" or argType == "weapon" or argType == "unit" then
+        return "object"
+    end
+    local tagType = snakeCaseTagClasses[argType]
+    if tagType then
+        return "tag", tagType
+    end
+    return argType
+end
+
 --- Create a packet string for an hsc function invocation
 ---@param functionName string
 ---@param args string[]
 ---@return string
 function core.hscPacket(functionName, args)
-    local funcMeta = table.find(hscDoc.functions, function (v, k)
+    local funcMeta = table.find(hscDoc.functions, function(v, k)
         return v.funcName == functionName
     end)
     if not funcMeta then
         error("Function " .. functionName .. " not found in hscDoc")
     end
-    --print(inspect(args))
-    local args = table.map(args, function (v, i)
-        local argType = funcMeta.args[i]
-        if not table.indexof(hscDoc.nativeTypes, argType) then
-            --logger:debug("Checking if value: {} of type {} is a tag", v, argType)
-            local isTag = snakeCaseTagClasses[argType]
-            if isTag then
-                v = v:gsub("\"", "")
-                logger:warning("Value: {} is a tag, converting to tag handle!", v)
-                local tagEntry = blam.getTag(v, argType)
-                assert(tagEntry, "Failed to get tag entry for " .. v)
-                return tagEntry.id
+    local args = table.map(args, function(argValue, argIndex)
+        local argType, tagType = getArgType(funcMeta, argIndex)
+        if argType == "object" then
+            local objectIndex = getObjectIndexByName(argValue)
+            if objectIndex then
+                logger:debug("Value {} is an object, converting to object index!", argValue)
+                return objectIndex
+            end
+        elseif argType == "tag" then
+            local argIsSubExpression = argValue:startswith "(" and argValue:endswith ")"
+            if not argIsSubExpression then
+                local tagEntry = blam.getTag(argValue, tagType)
+                if tagEntry then
+                    logger:debug("Value {} is a tag, converting to tag handle!", argValue)
+                    return tagEntry.id
+                end
             end
         end
-        return v
+        return argValue
     end)
 
-    local packet = {
-        "@" .. funcMeta.hash,
-        table.unpack(args)
-    }
+    local packet = {packetPrefix .. funcMeta.hash, table.unpack(args)}
 
     return concat(packet, packetSeparator)
+end
+
+local function getObjectNameByIndex(objectIndex)
+    local scenario = blam.scenario(0)
+    assert(scenario, "Failed to load scenario tag")
+    return scenario.objectNames[objectIndex + 1]
+end
+
+function core.parseHscPacket(packet)
+    assert(packet and packet:startswith(packetPrefix), "Invalid HSC packet")
+    local packetParts = split(packet:replace(packetPrefix, ""), packetSeparator)
+    local funcHash = packetParts[1]
+    local funcMeta = table.find(hscDoc.functions, function(v, k)
+        return v.hash == funcHash
+    end)
+    assert(funcMeta, "Function not found in hscDoc")
+    local packetData = table.slice(packetParts, 2)
+    packetData = table.map(packetData, function(argValue, argIndex)
+        local argType = getArgType(funcMeta, argIndex)
+        if argType == "object" then
+            local objectName = getObjectNameByIndex(tointeger(argValue))
+            if objectName then
+                logger:debug("Value {} is an object index, converting to object name!", argValue)
+                return objectName
+            end
+        elseif argType == "tag" then
+            local tagEntry = blam.getTag(argValue)
+            if tagEntry then
+                logger:debug("Value {} is a tag handle, converting to tag path!", argValue)
+                return tagEntry.path
+            end
+        end
+        return argValue
+    end)
+    return funcMeta.funcName .. " " .. concat(packetData, " ")
 end
 
 --- Create a packet string to define object properties
@@ -360,26 +417,6 @@ end
 ---@param name string
 function core.toSentenceCase(name)
     return string.gsub(" " .. name:gsub("_", " "), "%W%l", string.upper):sub(2)
-end
-
----Parse and strip any hsc command into individual parts
----@param hscCommand string
----@return string[]
-function core.parseHSC(hscCommand)
-    local parsedCommand = trim(hscCommand)
-    -- Get words only inside '' with one or more characters from the set [a-Z,0-9, ,-,_,\\]
-    for word in hscCommand:gmatch("'[%w%- _\\]+'") do
-        local fixed = word:gsub("'", ""):gsub(" ", "%%20")
-        parsedCommand = parsedCommand:gsub(escape(word), escape(fixed))
-    end
-    local commandData = split(parsedCommand, " ")
-    -- Get just parameters from the entire command, remove space escaping
-    ---@type string[]
-    local params = table.map(commandData, function(parameter)
-        -- return parameter:gsub("%%20", " ")
-        return parameter:replace("%20", " ")
-    end)
-    return params
 end
 
 --- Process HSC code from the Harmony hook

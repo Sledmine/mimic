@@ -28,11 +28,9 @@ local core = require "mimic.core"
 local toSentenceCase = core.toSentenceCase
 local constants = require "mimic.constants"
 local version = require "mimic.version"
-local script = require "script"
-local hsc = require "hsc"
 
 -- Settings
-DebugMode = true
+DebugMode = false
 local bspIndexAddress = 0x40002CD8
 local passwordAddress
 local failMessageAddress
@@ -64,7 +62,7 @@ end
 local function serverSideProjectiles(enable)
     -- TODO Move this function to core module
     if not allowClientSideWeaponProjectilesAddress then
-        log("error", "Error no address found for client side weapon projectiles")
+        logger:error("Error no address found for client side weapon projectiles")
     end
     write_byte(allowClientSideWeaponProjectilesAddress, enable and 0x0 or 0x1)
 end
@@ -82,14 +80,6 @@ function Send(playerIndex, message)
     rprint(playerIndex, message)
     return false
 end
-
-hsc.addMiddleWare(function(functionName, args)
-    local hscPacket = core.hscPacket(functionName, args)
-    if hscPacket then
-        log("debug", "HSC Packet: " .. hscPacket)
-        Broadcast(hscPacket)
-    end
-end)
 
 function SyncGameState(playerIndex)
     for objectId, group in pairs(deviceMachinesList) do
@@ -233,11 +223,11 @@ function RegisterPlayerSync(playerIndex)
         if player.ping > 300 then
             say(playerIndex, "Your ping is too high, you may experience sync problems")
         end
-        log("debug", "Player table address is " .. string.tohex(get_player(playerIndex)))
-        log("debug", "Player biped id is " .. string.tohex(player.objectId))
-        log("debug", "Player sync index is " .. string.tohex(player.index))
-        log("debug", "Player " .. player.name .. " ping is " .. player.ping .. "ms")
-        log("debug", "SyncUpdate timer for player " .. playerIndex .. " set to " .. interval .. "ms")
+        logger:debug("Player table address is {}", string.tohex(get_player(playerIndex)))
+        logger:debug("Player biped id is {}", string.tohex(player.objectId))
+        logger:debug("Player sync index is {}", string.tohex(player.index))
+        logger:debug("Player {} ping is {}ms", player.name, player.ping)
+        logger:debug("SyncUpdate timer for player {} set to {}ms", playerIndex, interval)
         lastObjectStatePerPlayer[playerIndex] = {}
         set_timer(interval, "SyncUpdate" .. playerIndex)
     end
@@ -258,7 +248,7 @@ end
 function OnPlayerLeave(playerIndex)
     -- Remove player from sync update
     _G["SyncUpdate" .. playerIndex] = function()
-        log("debug", "Removing SyncUpdate timer for player " .. playerIndex)
+        logger:debug("Removing SyncUpdate timer for player {}", playerIndex)
         return false
     end
 end
@@ -295,11 +285,11 @@ function ShowCurrentSyncedObjects(printTable)
         end
     end
     if syncedObjectsCount > 500 then
-        log("warning", "There are more than 500 synced objects, this will cause sync issues")
+        logger:warning("There are more than 500 synced objects, this will cause sync issues")
         say_all("There are more than 500 synced objects, this will cause sync issues")
     end
-    log("info", "Total synced objects: " .. syncedObjectsCount)
-    log("info", "Total synced bipeds: " .. #core.getSyncedBipedIds())
+    logger:info("Total synced objects: {}", syncedObjectsCount)
+    logger:info("Total synced bipeds: {}", #core.getSyncedBipedIds())
     return true
 end
 
@@ -308,22 +298,11 @@ function OnGameStart()
         set_timer(5000, "ShowCurrentSyncedObjects")
     end
 
-    hsc.print("Test hsc!!!!!!!!!!!!!!!!!")
-    hsc.game_difficulty_set("hard")
-    logger:debug("Return value: {}", hsc.volume_test_objects("motiontracker_4", "player0"))
-    hsc.device_set_position("tunnel_door_3", 0)
-
-    logger:debug("Return value: {}", hsc.device_get_position("tunnel_door_3"))
-    hsc.fade_in(1, 1, 1, 1)
-    hsc.object_create("cafeteria_door_1")
-    hsc.effect_new("cinematics\\effects\\cortana effects\\cortana on off", "x10_cortana_effect")
-    local _ = require("a10")
-
-    log("info", "Mimic version: " .. version)
+    logger:info("Mimic version: {}", version)
     currentScenario = blam.scenario(0)
     assert(currentScenario, "No current scenario tag found")
     if currentScenario.encounterPaletteCount > 0 then
-        log("warning", "Scenario has AI encounters, enabling projectiles sync")
+        logger:warning("Scenario has AI encounters, enabling projectiles sync")
         serverSideProjectiles(true)
     else
         serverSideProjectiles(false)
@@ -331,12 +310,11 @@ function OnGameStart()
 end
 
 function OnTick()
-    script.poll()
     -- Check for BSP Changes
     local bspIndex = read_byte(bspIndexAddress)
     if bspIndex ~= currentBspIndex then
         currentBspIndex = bspIndex
-        log("debug", "New bsp index detected: " .. currentBspIndex)
+        logger:debug("New bsp index detected: {}", currentBspIndex)
         Broadcast("sync_switch_bsp " .. currentBspIndex)
     end
 

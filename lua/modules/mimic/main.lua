@@ -10,7 +10,6 @@ objectClasses = blam.objectClasses
 tagClasses = blam.tagClasses
 local isNull = blam.isNull
 local core = require "mimic.core"
-local hsc = require "mimic.hsc"
 package.preload["luna"] = nil
 package.loaded["luna"] = nil
 require "luna"
@@ -322,24 +321,15 @@ local function processPacket(message, packetType, packet)
                     end
                 end
             end
-        end
-    else
-        for actionName, action in pairs(hsc) do
-            if packetType == action.packetType then
-                dprint("Sync packet: " .. message)
-                local syncPacket = {action.name}
-                for argumentIndex, arg in pairs(action.parameters) do
-                    local outputValue = packet[argumentIndex + 1]
-                    if arg.value and arg.class then
-                        outputValue =
-                            blam.getTag(tonumber(outputValue) --[[@as number]] )[arg.value]
-                    end
-                    append(syncPacket, outputValue)
-                end
-                local localCommand = concat(syncPacket, " ")
-                dprint("Local command: " .. localCommand)
-                engine.hsc.executeScript(localCommand)
+        else
+            local hscCommand = core.parseHscPacket(message)
+            assert(hscCommand, "Error, hsc command is not valid")
+            if DebugMode then
+                --if DebugLevel >= 2 then
+                    logger:debug("Executing HSC command: {}", hscCommand)
+                --end
             end
+            engine.hsc.executeScript(hscCommand)
         end
     end
     -- dprint("Packet processed, elapsed time: %.6f\n", os.time() - time)
