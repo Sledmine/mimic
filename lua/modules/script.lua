@@ -100,6 +100,7 @@ local function handleScriptThread(scriptThread, result)
     if coroutine.status(scriptThread.thread) == "dead" then
         if scriptThread.type == "continuous" then
             scriptThread.thread = coroutine.create(scriptThread.func)
+            scriptThread.started = false
         else
             removeThreadFromTrace(scriptThread)
             if scriptThread.parent then
