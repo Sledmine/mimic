@@ -139,7 +139,7 @@ local function convertAstToLua(astNode)
         local hscArgs = node["args"]
         local name = node["function"]
         if name == "global" then
-            local varType = hscArgs[1]
+            local varType = convertToString(hscArgs[1])
             local varName = hscArgs[2]
             local varValue = hscArgs[3]
             if type(varValue) == "table" then
@@ -396,9 +396,6 @@ local function convertAstToLua(astNode)
             local scriptName = hscArgs[2]
             if scriptName then
                 if sleepForTicks == "-1" then
-                    -- TODO Ccheck about this it seems like this tries to stop another script
-                    lua = lua .. "stop(" .. scriptName .. ")\n"
-                else
                     lua = lua .. "sleep(" .. sleepForTicks .. ", " .. scriptName .. ")\n"
                 end
             else
@@ -434,7 +431,7 @@ local function convertAstToLua(astNode)
             for index, arg in ipairs(hscArgs) do
                 -- Argument is a string value (not a symbol cause it starts with "str_")
                 if type(arg) == "string" then
-                    local argMetadata = table.find(hscDoc, function(doc)
+                    local argMetadata = table.find(hscDoc.functions, function(doc)
                         return doc.funcName:trim() == name:trim()
                     end)
                     if argMetadata then
