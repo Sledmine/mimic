@@ -159,11 +159,12 @@ local function processPacket(message, packetType, packet)
             local x = core.decode("f", packet[3])
             local y = core.decode("f", packet[4])
             local z = core.decode("f", packet[5])
-            local animation = tonumber(packet[6])
-            local animationFrame = tonumber(packet[7])
-            local yaw = core.decode("f", packet[8])
-            local pitch = core.decode("f", packet[9])
-            local roll = core.decode("f", packet[10])
+            local animationTagIndex = tonumber(packet[6])
+            local animationIndex = tonumber(packet[7])
+            local animationFrame = tonumber(packet[8])
+            local yaw = core.decode("f", packet[9])
+            local pitch = core.decode("f", packet[10])
+            local roll = core.decode("f", packet[11])
 
             local objectId = blam.getObjectIdBySyncedIndex(syncedIndex)
             if objectId then
@@ -177,8 +178,8 @@ local function processPacket(message, packetType, packet)
                             end
                         end
                         core.virtualizeObject(object)
-                        core.updateObject(objectId, x, y, z, yaw, pitch, roll, animation,
-                                          animationFrame)
+                        core.updateObject(objectId, x, y, z, yaw, pitch, roll, animationIndex,
+                                          animationFrame, animationTagIndex)
                     end
                 else
                     logger:error(

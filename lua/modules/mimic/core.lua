@@ -19,6 +19,7 @@ local concat = table.concat
 local blam = require "blam"
 local isNull = blam.isNull
 local color = require "ncolor"
+local getIndexById = blam.getIndexById
 
 local core = {}
 local packetPrefix = "@"
@@ -85,6 +86,7 @@ function core.updateObjectPacket(syncedIndex, object)
         encode("f", object.x),
         encode("f", object.y),
         encode("f", object.z),
+        getIndexById(object.animationTagId),
         object.animation,
         object.animationFrame,
         encode("f", yaw),
@@ -202,7 +204,8 @@ local function getArgType(funcMeta, argIndex)
     if table.indexof(hscDoc.nativeTypes, argType) then
         return argType
     end
-    if argType == "object" or argType == "vehicle" or argType == "biped" or argType == "weapon" or argType == "unit" then
+    if argType == "object" or argType == "vehicle" or argType == "biped" or argType == "weapon" or
+        argType == "unit" or argType == "scenery" or argType == "device" or argType == "object_name" then
         return "object"
     end
     local tagType = snakeCaseTagClasses[argType]
@@ -252,12 +255,12 @@ end
 local function getObjectNameByIndex(objectIndex)
     local scenario = blam.scenario(0)
     assert(scenario, "Failed to load scenario tag")
-    return scenario.objectNames[objectIndex + 1]
+    return scenario.objectNames[objectIndex]
 end
 
 function core.parseHscPacket(packet)
     assert(packet and packet:startswith(packetPrefix), "Invalid HSC packet")
-    logger:debug("Parsing HSC packet: {}", packet)
+    --logger:debug("Parsing HSC packet: {}", packet)
     local packetParts = split(packet:replace(packetPrefix, ""), packetSeparator)
     local funcHash = packetParts[1]
     local funcMeta = table.find(hscDoc.functions, function(v, k)
@@ -276,15 +279,17 @@ function core.parseHscPacket(packet)
             if argValue == "none" or argValue == "" then
                 return argValue
             end
-            local objectName = getObjectNameByIndex(tointeger(argValue))
+            local objectIndex = tointeger(argValue)
+            assert(objectIndex, "Failed to convert object index to number")
+            local objectName = getObjectNameByIndex(objectIndex)
             if objectName then
-                logger:debug("Value {} is an object index, converting to object name!", argValue)
+                --logger:debug("Value {} is an object index, converting to object name!", argValue)
                 return objectName
             end
         elseif argType == "tag" then
             local tagEntry = blam.getTag(tointeger(argValue))
             if tagEntry then
-                logger:debug("Value {} is a tag handle, converting to tag path!", argValue)
+                --logger:debug("Value {} is a tag handle, converting to tag path!", argValue)
                 return tagEntry.path
             end
         end
@@ -359,7 +364,7 @@ function core.objectIsNearTo(biped, target, sensitivity)
     return false
 end
 
-function core.updateObject(objectId, x, y, z, yaw, pitch, roll, animation, animationFrame)
+function core.updateObject(objectId, x, y, z, yaw, pitch, roll, animation, animationFrame, animationTagIndex)
     if objectId then
         local object = blam.object(get_object(objectId))
         -- NOTES:
@@ -384,6 +389,9 @@ function core.updateObject(objectId, x, y, z, yaw, pitch, roll, animation, anima
         blam.rotateObject(object, yaw, pitch, roll)
 
         if isBiped then
+            local animationTagHandle = blam.getTag(animationTagIndex, tagClasses.modelAnimations).id
+            assert(animationTagHandle, "Failed to get synced animation tag id")
+            object.animationTagId = animationTagHandle
             object.animation = animation
             object.animationFrame = animationFrame
         end
