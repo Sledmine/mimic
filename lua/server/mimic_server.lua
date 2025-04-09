@@ -220,8 +220,9 @@ function RegisterPlayerSync(playerIndex)
         if player.ping < constants.syncEveryMillisecs then
             interval = constants.syncEveryMillisecs + 15
         end
-        if player.ping > 300 then
+        if player.ping > constants.maximumSyncInterval then
             say(playerIndex, "Your ping is too high, you may experience sync problems")
+            interval = constants.maximumSyncInterval
         end
         logger:debug("Player table address is {}", string.tohex(get_player(playerIndex)))
         logger:debug("Player biped id is {}", string.tohex(player.objectId))

@@ -8,6 +8,7 @@ return {
         execute = function(enable, level)
             DebugMode = luna.bool(enable)
             DebugLevel = tonumber(level) or 1
+            logger:muteDebug(not DebugMode)
             logger:info("Debug mode " .. (DebugMode and "enabled" or "disabled"))
         end
     },
