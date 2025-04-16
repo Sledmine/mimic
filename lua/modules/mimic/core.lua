@@ -20,6 +20,7 @@ local blam = require "blam"
 local isNull = blam.isNull
 local color = require "ncolor"
 local getIndexById = blam.getIndexById
+local engine = Engine
 
 local core = {}
 local packetPrefix = "@"
@@ -260,7 +261,7 @@ end
 
 function core.parseHscPacket(packet)
     assert(packet and packet:startswith(packetPrefix), "Invalid HSC packet")
-    --logger:debug("Parsing HSC packet: {}", packet)
+    -- logger:debug("Parsing HSC packet: {}", packet)
     local packetParts = split(packet:replace(packetPrefix, ""), packetSeparator)
     local funcHash = packetParts[1]
     local funcMeta = table.find(hscDoc.functions, function(v, k)
@@ -274,7 +275,7 @@ function core.parseHscPacket(packet)
             return argValue
         end
         local argType = getArgType(funcMeta, argIndex)
-        --logger:debug("Arg type: \"{}\" for value: \"{}\"", argType, argValue)
+        -- logger:debug("Arg type: \"{}\" for value: \"{}\"", argType, argValue)
         if argType == "object" then
             if argValue == "none" or argValue == "" then
                 return argValue
@@ -283,13 +284,13 @@ function core.parseHscPacket(packet)
             assert(objectIndex, "Failed to convert object index to number")
             local objectName = getObjectNameByIndex(objectIndex)
             if objectName then
-                --logger:debug("Value {} is an object index, converting to object name!", argValue)
+                -- logger:debug("Value {} is an object index, converting to object name!", argValue)
                 return objectName
             end
         elseif argType == "tag" then
             local tagEntry = blam.getTag(tointeger(argValue))
             if tagEntry then
-                --logger:debug("Value {} is a tag handle, converting to tag path!", argValue)
+                -- logger:debug("Value {} is a tag handle, converting to tag path!", argValue)
                 return tagEntry.path
             end
         end
@@ -364,7 +365,16 @@ function core.objectIsNearTo(biped, target, sensitivity)
     return false
 end
 
-function core.updateObject(objectId, x, y, z, yaw, pitch, roll, animation, animationFrame, animationTagIndex)
+function core.updateObject(objectId,
+                           x,
+                           y,
+                           z,
+                           yaw,
+                           pitch,
+                           roll,
+                           animation,
+                           animationFrame,
+                           animationTagIndex)
     if objectId then
         local object = blam.object(get_object(objectId))
         -- NOTES:
@@ -711,6 +721,32 @@ function core.patchPlayerConnectionTimeout(revert)
     end
     write_word(setDisconnectedFlagAddress, expandedTimeout)
     safe_write(false)
+end
+
+--- Disable player collision
+---@param enable boolean
+function core.disablePlayerCollision(enable)
+    if engine.netgame.getServerType() == "dedicated" then
+        for playerIndex = 1, 16 do
+            local playerObject = get_dynamic_player(playerIndex)
+            if playerObject then
+                local biped = blam.biped(playerObject)
+                if biped then
+                    blam.bipedTag(biped.tagId).disableCollision = enable
+                end
+            end
+        end
+    else
+        for playerIndex = 0, 15 do
+            local playerObject = get_dynamic_player(playerIndex)
+            if playerObject then
+                local biped = blam.biped(playerObject)
+                if biped then
+                    blam.bipedTag(biped.tagId).disableCollision = enable
+                end
+            end
+        end
+    end
 end
 
 return core

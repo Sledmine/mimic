@@ -354,14 +354,9 @@ function OnTick()
     if not gameStarted then
         onGameStart()
     end
+    core.disablePlayerCollision(DisablePlayerCollision)
     -- Start removing the server created bipeds only when the server aks for it
     if blam.isGameDedicated() then
-        if DisablePlayerCollision then
-            local biped = blam.biped(get_dynamic_player())
-            if biped then
-                blam.bipedTag(biped.tagId).disableCollision = true
-            end
-        end
         if enableSync and gameStarted then
             -- Constantly erase locally created AI bipeds
             engine.hsc.executeScript("ai_erase_all")

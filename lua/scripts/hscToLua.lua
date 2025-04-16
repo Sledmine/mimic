@@ -128,7 +128,10 @@ local function convertToString(value)
     return value
 end
 
-local nativeTypes = {"boolean", "short", "long", "real"}
+local nativeTypes = table.filter(hscDoc.nativeTypes, function(v)
+    -- Remove string native types as we already handle those in the transpilation
+    return not v:includes "string"
+end)
 
 local function convertAstToLua(astNode)
     local lua = ""

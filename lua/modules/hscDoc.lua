@@ -2,10 +2,14 @@ local hscDoc = {}
 
 hscDoc.nativeTypes = {
   "boolean",
+  "booleans",
   "real",
   "short",
   "long",
-  "string"
+  "string",
+  "strings",
+  "number",
+  "numbers"
 }
 
 hscDoc.nonNativeTypes = {
@@ -953,7 +957,7 @@ hscDoc.functions = { {
   funcName = "unit_enter_vehicle",
   hash = "D3416",
   isNative = true,
-  isSynchronizable = false,
+  isSynchronizable = true,
   returnType = "void"
 }, {
   args = { "vehicle", "string", "object_list" },
