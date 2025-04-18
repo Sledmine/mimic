@@ -12,6 +12,14 @@ return {
             logger:info("Debug mode " .. (DebugMode and "enabled" or "disabled"))
         end
     },
+    sync = {
+        description = "Enable or disable sync mode",
+        help = "<enable>",
+        execute = function(enable)
+            IsSyncEnabled = luna.bool(enable)
+            logger:info("Sync mode " .. (IsSyncEnabled and "enabled" or "disabled"))
+        end
+    },
     collision = {
         description = "Enable or disable bipeds collision",
         help = "<enable>",

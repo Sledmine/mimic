@@ -49,6 +49,7 @@ end
 
 DebugMode = false
 DebugLevel = 1
+IsSyncEnabled = true
 local isNewMap = true
 local main
 

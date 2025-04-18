@@ -173,12 +173,12 @@ function SyncUpdate(playerIndex)
                 if core.unitPropertiesShouldBeSynced(unit, lastObjectState) then
                     lastObjectState = blam.dumpObject(unit)
                     lastObjectStatePerPlayer[playerIndex][syncedIndex] = lastObjectState
-                    Send(playerIndex, core.unitProperties(syncedIndex, unit))
+                    Send(playerIndex, core.unitPropertiesPacket(syncedIndex, unit))
 
                     if object.class == objectClasses.biped then
                         local biped = blam.biped(object.address)
                         assert(biped, "Biped cast failed")
-                        Send(playerIndex, core.bipedProperties(syncedIndex, biped))
+                        Send(playerIndex, core.bipedPropertiesPacket(syncedIndex, biped))
                     end
                 end
             end

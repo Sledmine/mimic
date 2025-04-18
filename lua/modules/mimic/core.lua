@@ -302,7 +302,7 @@ end
 --- Create a packet string to define object properties
 ---@param syncedIndex number
 ---@param unit unit
-function core.unitProperties(syncedIndex, unit)
+function core.unitPropertiesPacket(syncedIndex, unit)
     local parentSeatIndex
     local parentObjectSyncedIndex = core.getSyncedIndexByObjectId(unit.parentObjectId)
     if not isNull(unit.parentSeatIndex) then
@@ -338,13 +338,14 @@ end
 --- Create a packet string to define biped properties
 ---@param syncedIndex number
 ---@param biped biped
-function core.bipedProperties(syncedIndex, biped)
+function core.bipedPropertiesPacket(syncedIndex, biped)
     local packet = concat({
         "@b",
         syncedIndex,
         core.getSyncedIndexByObjectId(biped.firstWeaponObjectId) or "",
         core.getSyncedIndexByObjectId(biped.secondWeaponObjectId) or "",
-        biped.flashlight and 1 or 0
+        biped.flashlight and 1 or 0,
+        biped.isApparentlyDead and 1 or 0,
     }, packetSeparator)
     assert(#packet <= 64, "Packet size is too big")
     return packet

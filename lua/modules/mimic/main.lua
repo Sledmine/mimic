@@ -286,8 +286,16 @@ local function processPacket(message, packetType, packet)
             local firstWeaponObjectSyncedIndex = tonumber(packet[3])
             local secondWeaponObjectSyncedIndex = tonumber(packet[4])
             local flashlight = tonumber(packet[5]) == 1
+            local isApparentlyDead = tonumber(packet[6]) == 1
 
             biped.flashlight = flashlight
+            -- Keep in mind this will kill the biped on our client side, making this not ideal
+            -- for bipeds that can fake death, like floods
+            -- TODO Also if biped just got created we will able to see a dying animation, we should
+            -- try to find the proper dead animation and force it to apply in the last frame
+            -- TODO Remove fake dead chance for all bipeds on the client side so we can stick to
+            -- thrusting this value as true death
+            biped.isApparentlyDead = isApparentlyDead
 
             if not isNull(biped.playerId) then
                 return
@@ -322,13 +330,14 @@ local function processPacket(message, packetType, packet)
                     end
                 end
             end
+
         else
             local hscCommand = core.parseHscPacket(message)
             assert(hscCommand, "Error, hsc command is not valid")
             if DebugMode then
-                --if DebugLevel >= 2 then
-                    logger:debug("Executing HSC command: {}", hscCommand)
-                --end
+                -- if DebugLevel >= 2 then
+                logger:debug("Executing HSC command: {}", hscCommand)
+                -- end
             end
             engine.hsc.executeScript(hscCommand)
             if hscCommand:includes("camera_set") then
@@ -389,6 +398,9 @@ end
 ---@param message string
 ---@return boolean?
 function OnPacket(message)
+    if not IsSyncEnabled then
+        return false
+    end
     if DebugMode and DebugLevel >= 4 then
         logger:debug("Received packet: {}", message)
     end
