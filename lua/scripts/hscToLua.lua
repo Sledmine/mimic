@@ -50,7 +50,8 @@ local parser = P {
     wspace = S " \n\r\t" ^ 0,
     atom = V "boolean" + V "number" + V "string" + V "symbol",
     symbol = C((1 - S " \n\r\t\"'()[]{}#@~") ^ 1) / function(s)
-        if s:includes("/") then
+        -- Consider all symbols that have / as a string, except if it is the division (/) operator
+        if s:includes("/") and s:len() > 1 then
             return "str_" .. s
         end
         return s
@@ -341,6 +342,16 @@ local function convertAstToLua(astNode)
                 var2 = convertAstToLua(var2)
             end
             lua = lua .. var1 .. " ~= " .. var2 .. "\n"
+        elseif name == "/" then
+            local var1 = hscArgs[1]
+            local var2 = hscArgs[2]
+            if type(var1) == "table" then
+                var1 = convertAstToLua(var1)
+            end
+            if type(var2) == "table" then
+                var2 = convertAstToLua(var2)
+            end
+            lua = lua .. var1 .. " / " .. var2 .. "\n"
         elseif name == "script" then
             local scriptType = hscArgs[1]
             local scriptName = hscArgs[2]
