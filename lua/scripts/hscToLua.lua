@@ -410,7 +410,11 @@ local function convertAstToLua(astNode)
             local scriptName = hscArgs[2]
             if scriptName then
                 if sleepForTicks == "-1" then
-                    lua = lua .. "sleep(" .. sleepForTicks .. ", " .. scriptName .. ")\n"
+                    if args.module then
+                        lua = lua .. "sleep(-1, " .. args.module .. "." .. scriptName .. ")\n"
+                    else
+                        lua = lua .. "sleep(-1, " .. scriptName .. ")\n"
+                    end
                 end
             else
                 lua = lua .. "sleep(" .. sleepForTicks .. ")\n"
@@ -542,4 +546,9 @@ if args.debug then
     print(lua)
 end
 
-assert(luna.file.write(args.output, lua), "Error writing Lua file")
+local split = args.input:replace("\\", "/"):split("/")
+local fileName = split[#split]
+local fileNameWithoutExtension = fileName:split(".")[1]
+
+assert(luna.file.write(fileNameWithoutExtension .. ".lua", lua),
+"Error writing Lua file, check if you have write permissions to the directory")
