@@ -37,7 +37,7 @@ local argparse = require "lua.scripts.modules.argparse"
 local hscDoc = require "lua.modules.hscDoc"
 
 local parser = argparse("hscToLua", "Transpiler for HSC (Halo Script Language) to Lua")
-parser:argument("input", "Input HSC file to transpile")
+parser:argument("input", "Input HSC files to transpile"):args("*")
 parser:option("-o --output", "Output Lua file to save the transpiled code", "output.lua")
 parser:flag("--debug", "Enable debug mode")
 parser:option("--module", "Write script as a module with a given name")
@@ -48,7 +48,7 @@ local parser = P {
     "program", -- initial rule
     program = Ct(V "sexpr" ^ 0),
     wspace = S " \n\r\t" ^ 0,
-    atom = V "boolean" + V "number" + V "string" + V "symbol",
+    atom = V "boolean" + V "string" + V "symbol" + V "number",
     symbol = C((1 - S " \n\r\t\"'()[]{}#@~") ^ 1) / function(s)
         -- Consider all symbols that have / as a string, except if it is the division (/) operator
         if s:includes("/") and s:len() > 1 then
@@ -156,6 +156,7 @@ local function convertAstToLua(astNode)
                 varValue = luna.bool(varValue)
             end
             variables[varName] = varType
+            --print("Creating global variable " .. varName .. " of type " .. varType)
             lua = lua .. "local " .. varName .. " = " .. tostring(varValue) .. "\n"
         elseif name == "*" then
             local var1 = hscArgs[1]
@@ -245,7 +246,7 @@ local function convertAstToLua(astNode)
             -- This might help to produce more accurate "blocks" of code that keep scope of execution
             -- but it will look weird and might not be easy to read
             -- Check out the "begin_random" block for an example of possible conflicting cases
-        elseif name == "begin_random" then
+        elseif name == "begin_random" or name == "cond" then
             local body = hscArgs
             for i, v in ipairs(body) do
                 if type(v) == "table" then
@@ -260,7 +261,7 @@ local function convertAstToLua(astNode)
             body = table.map(body, function(v)
                 return "function() " .. v .. " end"
             end)
-            lua = lua .. "hsc.begin_random({\n" .. table.concat(body, ",\n") .. "})\n"
+            lua = lua .. "hsc." .. name .. "({\n" .. table.concat(body, ",\n") .. "})\n"
             -- This might be an edge case so it is still safely to unwrap "begin" blocks in same
             -- scope after all, cause there are no other functions that explicitly run another
             -- function in different scopes.. I think
@@ -357,16 +358,52 @@ local function convertAstToLua(astNode)
             local scriptName = hscArgs[2]
             local scriptBody = hscArgs[3]
             local scriptReturnType
+            local scriptArgs
             if scriptType == "static" then
                 scriptReturnType = hscArgs[2]
                 scriptName = hscArgs[3]
                 scriptBody = hscArgs[4]
+                -- Script has arguments
+                if type(scriptName) == "table" then
+                    local args = hscArgs[3]
+                    scriptName = args["function"]
+                    scriptArgs = table.map(args["args"], function(v)
+                        local type =  v["function"]
+                        local args = v["args"]
+                        return {
+                            type = type,
+                            name = args[1]
+                        }
+                    end)
+                    -- Remove script name from the body to prevent invokation
+                    hscArgs[3] = scriptName
+                end
+                userDefinedFunctions[scriptName] = {
+                    args = scriptArgs,
+                    returnType = scriptReturnType
+                }
+                if scriptArgs then
+                    scriptArgs = table.map(scriptArgs, function(v)
+                        return v["name"]
+                    end)
+                    print(inspect(scriptArgs))
+                end
             end
-            userDefinedFunctions[scriptName] = scriptBody
+            --print("Creating function " .. scriptName)
             if args.module then
-                lua = lua .. "function " .. args.module .. "." .. scriptName .. "(call, sleep)\n"
+                if scriptArgs then
+                    lua = lua .. "function " .. args.module .. "." .. scriptName .. "(call, sleep, " ..
+                              table.concat(scriptArgs, ", ") .. ")\n"
+                else
+                    lua = lua .. "function " .. args.module .. "." .. scriptName .. "(call, sleep)\n"
+                end
             else
-                lua = lua .. "function " .. scriptName .. "(call, sleep)\n"
+                if scriptArgs then
+                    lua = lua .. "function " .. scriptName .. "(call, sleep, " ..
+                              table.concat(scriptArgs, ", ") .. ")\n"
+                else
+                    lua = lua .. "function " .. scriptName .. "(call, sleep)\n"
+                end
             end
             for i, v in ipairs(hscArgs) do
                 if type(v) == "table" then
@@ -488,11 +525,21 @@ local function convertAstToLua(astNode)
             -- end
             -- lua = lua .. functionName .. "(" .. table.concat(functionArgs, ", ") .. ")\n"
             --
-            if userDefinedFunctions[name] then
-                -- We are calling a user defined function
-
+            local definedFunction = userDefinedFunctions[name]
+            -- We are calling a user defined function
+            if definedFunction then
+                --print("Creating user defined function " .. name)
+                local functionArgs = definedFunction.args
                 if args.module then
-                    lua = lua .. "call(" .. args.module .. "." .. name .. ")\n"
+                    if functionArgs then
+                        functionArgs = table.map(functionArgs, function(v)
+                            return v["name"]
+                        end)
+                        lua = lua .. "call(" .. args.module .. "." .. name .. table.concat(functionArgs,
+                                  ", ") .. ")\n"
+                    else
+                        lua = lua .. "call(" .. args.module .. "." .. name .. ")\n"
+                    end
                 else
                     lua = lua .. "call(" .. name .. ")\n"
                 end
@@ -506,7 +553,15 @@ local function convertAstToLua(astNode)
 end
 
 -- HSC file as a string
-local hscInput = luna.file.read(args.input)
+local hscInput = ""
+for i, v in ipairs(args.input) do
+    local file = luna.file.read(v)
+    if file then
+        hscInput = hscInput .. file
+    else
+        print("Error reading HSC file " .. v)
+    end
+end
 assert(hscInput, "Error reading HSC file")
 -- Remove all comments from the HSC script (; is the comment delimiter)
 --
@@ -517,6 +572,7 @@ local hsc = parser:match(hscInput)
 if args.debug then
     print("------------------- AST -------------------------------")
     print(inspect(hsc))
+    return
 end
 
 local lua = convertAstToLua(hsc)
@@ -546,9 +602,9 @@ if args.debug then
     print(lua)
 end
 
-local split = args.input:replace("\\", "/"):split("/")
-local fileName = split[#split]
-local fileNameWithoutExtension = fileName:split(".")[1]
+--local split = args.input:replace("\\", "/"):split("/")
+--local fileName = split[#split]
+--local fileNameWithoutExtension = fileName:split(".")[1]
 
-assert(luna.file.write(fileNameWithoutExtension .. ".lua", lua),
-"Error writing Lua file, check if you have write permissions to the directory")
+--assert(luna.file.write(fileNameWithoutExtension .. ".lua", lua), "Error writing Lua file, check if you have write permissions to the directory")
+assert(luna.file.write(args.output, lua), "Error writing Lua file, check if you have write permissions to the directory")
