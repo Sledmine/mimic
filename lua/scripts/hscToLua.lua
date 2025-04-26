@@ -144,9 +144,10 @@ local nativeTypes = table.filter(hscDoc.nativeTypes, function(v)
     return not v:includes "string"
 end)
 
-local function convertAstToLua(astNode)
+local function convertAstToLua(astNode, context)
     local lua = ""
     for nodeIndex, node in ipairs(astNode) do
+        print("___________________________________________________________________")
         local name
         local astArgs
         if type(node) ~= "table" then
@@ -159,7 +160,10 @@ local function convertAstToLua(astNode)
         -- print("Node index: " .. nodeIndex)
         -- print("Node: " .. inspect(node))
         print("Node name: " .. name)
-        print("Args: " .. inspect(astArgs))
+        print("Arguments: ")
+        for k, v in pairs(astArgs) do
+            print(k, inspect(v))
+        end
         if name == "global" then
             local varType = convertToString(astArgs[1])
             local varName = astArgs[2]
@@ -377,7 +381,8 @@ local function convertAstToLua(astNode)
             local scriptName = astArgs[2]
             local scriptBody = table.slice(astArgs, 3)
             local scriptReturnType
-            local scriptArgs
+            local scriptParameters
+            print("-> Creating script \"" .. scriptName .. "\" of type \"" .. scriptType .. "\"")
             if scriptType == "static" then
                 scriptReturnType = astArgs[2]
                 scriptName = astArgs[3]
@@ -386,41 +391,54 @@ local function convertAstToLua(astNode)
                 if type(scriptName) == "table" then
                     local args = astArgs[3]
                     scriptName = args[1]
-                    scriptArgs = table.slice(args, 2)
+                    scriptParameters = table.slice(args, 2)
                     -- Remove script name from the body to prevent invokation
                     -- astArgs[3] = scriptName
                 end
                 -- Create metadata for user defined function, used later on to determine arg types
-                userDefinedFunctions[scriptName] = {
+                local definedFunction = {
                     returnType = scriptReturnType,
-                    args = table.map(scriptArgs or {}, function(v)
-                        -- return v[1]
-                        return var
+                    args = table.map(scriptParameters or {}, function(v)
+                        local argType = v[1]
+                        local argName = v[2]
+                        return argType
+                    end),
+                    parameters = table.map(scriptParameters or {}, function(v)
+                        local argType = v[1]
+                        local argName = v[2]
+                        return argName
                     end)
                 }
-                if scriptArgs then
-                    scriptArgs = table.map(scriptArgs, function(v)
+                print("Parameters: ")
+                for k,v in pairs(scriptParameters or {}) do
+                    --print(k, inspect(v))
+                    local argType = v[1]
+                    local argName = v[2]
+                    print(k, argType, argName)
+                end
+                userDefinedFunctions[scriptName] = definedFunction
+                if scriptParameters then
+                    scriptParameters = table.map(scriptParameters, function(v)
                         local argType = v[1]
                         local argName = v[2]
                         return argName
                     end)
                 end
             end
-            print("\t-> Creating script " .. scriptName .. " of type " .. scriptType)
-            if scriptArgs then
-                print("\t-> Script arguments: " .. inspect(scriptArgs))
+            if scriptParameters then
                 lua = lua .. "function " .. args.module .. "." .. scriptName .. "(call, sleep, " ..
-                          table.concat(scriptArgs, ", ") .. ")\n"
+                          table.concat(scriptParameters, ", ") .. ")\n"
             else
                 lua = lua .. "function " .. args.module .. "." .. scriptName .. "(call, sleep)\n"
             end
-            print("\t-> Script body: " .. inspect(scriptBody))
+            print("Body: ")
             for i, v in ipairs(scriptBody) do
+                print(i, inspect(v))
                 if type(v) == "table" then
                     if scriptReturnType and scriptReturnType ~= "void" and i == #astArgs then
-                        lua = lua .. "return " .. convertAstToLua(v)
+                        lua = lua .. "return " .. convertAstToLua(v, definedFunction)
                     else
-                        lua = lua .. convertAstToLua(v)
+                        lua = lua .. convertAstToLua(v, definedFunction)
                     end
                 end
             end
@@ -490,33 +508,44 @@ local function convertAstToLua(astNode)
                 funcMetadata = userDefinedFunction
             end
             if funcMetadata then
-                print("\t-> Calling function " .. name)
-                print("\t-> Function arguments: " .. inspect(astArgs))
+                print("<---------------------------------------------------------------->")
+                print("-> Calling function: \"" .. name .. "\"")
+                print("Arguments: ")
                 -- print("Function metadata: " .. inspect(funcMetadata))
                 for index, arg in ipairs(astArgs or {}) do
                     -- Argument is a string value (not a symbol cause it starts with "str_")
                     local argType = funcMetadata.args[index]
-                    if type(arg) == "string" then
-                        if not table.indexof(nativeTypes, argType) and not arg:includes("(") and
-                            not arg:includes(")") and not variables[arg] then
-                            astArgs[index] = escapeStringValue(arg:replace("str_", ""))
-                        else
-                            astArgs[index] = convertToString(arg)
-                        end
-                    elseif type(arg) == "boolean" then
-                        astArgs[index] = tostring(arg)
-                    elseif type(arg) == "string" then
-                        if not arg:includes("(") and not arg:includes(")") and not arg:includes(" ") and
-                            not tonumber(arg) and not variables[arg] then
-                            astArgs[index] = escapeStringValue(arg)
-                        end
-                    elseif argType == "var" then
-                        print("WHAAAAAAAAAAAAAAAAAAAAAAT:", inspect(arg))
-                        astArgs[index] = arg:replace("\"", "")
+                    local parameter = funcMetadata.parameters and funcMetadata.parameters[index] or nil
+                    print(index, inspect(arg), argType)
+                    if parameter then
+                        print("Is context")
+                        local isParameter = table.find(context.args, function (v, k)
+                            print("asdasdasd", v)
+                            return v
+                        end)
                     else
-                        -- If the argument is a table, we need to convert it to Lua code
-                        if type(arg) == "table" then
-                            astArgs[index] = convertAstToLua(arg)
+                        if type(arg) == "string" then
+                            if not table.indexof(nativeTypes, argType) and not arg:includes("(") and
+                                not arg:includes(")") and not variables[arg] then
+                                astArgs[index] = escapeStringValue(arg:replace("str_", ""))
+                            else
+                                astArgs[index] = convertToString(arg)
+                            end
+                        elseif type(arg) == "boolean" then
+                            astArgs[index] = tostring(arg)
+                        elseif type(arg) == "string" then
+                            if not arg:includes("(") and not arg:includes(")") and not arg:includes(" ") and
+                                not tonumber(arg) and not variables[arg] then
+                                astArgs[index] = escapeStringValue(arg)
+                            end
+                        elseif argType == "var" then
+                            print("WHAAAAAAAAAAAAAAAAAAAAAAT:", inspect(arg))
+                            astArgs[index] = arg:replace("\"", "")
+                        else
+                            -- If the argument is a table, we need to convert it to Lua code
+                            if type(arg) == "table" then
+                                astArgs[index] = convertAstToLua(arg)
+                            end
                         end
                     end
                 end
@@ -527,6 +556,9 @@ local function convertAstToLua(astNode)
                     -- We are calling a function without arguments
                     lua = lua .. "hsc." .. name .. "()\n"
                 end
+            else
+                --print("Warning, no func")
+                lua = lua .. name
             end
         end
     end
