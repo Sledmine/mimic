@@ -67,16 +67,12 @@ local parser = P {
     list = P "'(" * Ct(V "expr" ^ 1) * P ")",
     array = P "[" * Ct(V "expr" ^ 1) * P "]",
     expr = V "wspace" * (V "coll" + V "atom" + V "sexpr"),
-    -- sexpr = V "wspace" * P "(" * V "symbol" * Ct(V "expr" ^ 0) * P ")" / function(f, ...)
-    --    return {["function"] = f, ["args"] = ...}
-    -- end
-    sexpr = V "wspace" * P "(" * V "symbol" * Ct(V "expr" ^ 0) * V "wspace" * P ")" /
-        function(f, ...)
-            -- for i, v in ipairs({...}) do
-            --    print("v", inspect(v))
-            -- end
+    group = V "wspace" * P "(" * Ct(V "expr" ^ 1) * V "wspace" * P ")",
+    sexpr = V "wspace" * P "(" * ( -- Try a function-style S-expression: (symbol expr*)
+    (V "symbol" * Ct(V "expr" ^ 0)) / function(f, ...)
             return {["function"] = f, ["args"] = ...}
-        end
+    end + -- Otherwise fallback to a grouped expression (e.g. for cond branches)
+    Ct(V "expr" ^ 1)) * V "wspace" * P ")"
 }
 
 -- some "built-ins"
