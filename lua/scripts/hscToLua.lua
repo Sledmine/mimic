@@ -656,6 +656,9 @@ local function convertAstToLua(astNode)
                                             end
                                         elseif arg:includes "\\" and arg:len() > 1 then
                                             hscArgs[index] = escapeStringValue(arg)
+                                        elseif not arg:includes "not " and not arg:includes "if " and
+                                            not arg:includes "call(" then
+                                            hscArgs[index] = escapeStringValue(arg)
                                         else
                                             hscArgs[index] = convertToString(arg)
                                         end
