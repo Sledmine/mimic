@@ -42,6 +42,7 @@ parser:option("-o --output", "Output Lua file to save the transpiled code", "out
 parser:flag("--debug", "Enable debug mode")
 parser:option("-m --module", "Write script as a module with a given name")
 parser:flag("--unwrap-begin", "Do not unwrap begin blocks", false)
+parser:flag("--missing-symbols", "Ignore missing symbols in the transpiled code", false)
 
 local args = parser:parse()
 
@@ -107,7 +108,7 @@ local userDefinedFunctions = {}
 --- @param value string
 --- @return string
 local function escapeStringValue(value)
-    local str = value
+    local str = tostring(value)
     str = str:replace("\\", "\\\\")
     if not str:startswith("\"") and not str:endswith("\"") then
         str = "\"" .. str .. "\""
@@ -127,7 +128,34 @@ local nativeTypes = table.filter(hscDoc.nativeTypes, function(v)
     return not v:includes "string"
 end)
 
-local isSymbolLookupDone = false
+local function isNotTranspiledText(v)
+    local t = tostring(v)
+    return not t:startswith "not " and not t:startswith "if " and not t:startswith "call(" and
+               not t:includes " = "
+end
+
+local function isSymbolAVariable(symbol)
+    -- Check if the symbol is a variable
+    local isVariable = table.find(localVariables, function(v)
+        return v == symbol
+    end)
+    isVariable = isVariable or globalVariables[symbol]
+    return isVariable
+end
+
+local function isNumber(v)
+    -- Check if the value is a number
+    if type(v) == "number" then
+        return true
+    end
+    -- Check if the value is a string that can be converted to a number
+    if type(v) == "string" and tonumber(v) then
+        return true
+    end
+    return false
+end
+
+local isSymbolLookupIteration = false
 
 local function convertAstToLua(astNode)
     local lua = ""
@@ -138,17 +166,19 @@ local function convertAstToLua(astNode)
         local hscArgs = node["args"] or {}
         local name = node["function"]
         if name == "global" then
-            local varType = convertToString(hscArgs[1])
+            local varType = hscArgs[1]
             local varName = hscArgs[2]
             local varValue = hscArgs[3]
             if type(varValue) == "table" then
                 varValue = convertAstToLua(varValue)
-            end
-            if not table.keyof(nativeTypes, varType) then
-                varValue = escapeStringValue(varValue)
-            end
-            if varType == "boolean" then
-                varValue = luna.bool(varValue)
+            else
+                if varType == "boolean" then
+                    varValue = luna.bool(varValue)
+                elseif isNumber(varValue) then
+                    varValue = tonumber(varValue)
+                else
+                    varValue = escapeStringValue(varValue)
+                end
             end
 
             -- Register the global variable existence and type
@@ -168,9 +198,19 @@ local function convertAstToLua(astNode)
             local varValue = hscArgs[2]
             if type(varValue) == "table" then
                 varValue = convertAstToLua(varValue)
+            elseif isNotTranspiledText(varValue) then
+                if globalVariables[varName] == "boolean" then
+                    ---@diagnostic disable-next-line: param-type-mismatch
+                    varValue = luna.bool(varValue)
+                elseif isNumber(varValue) then
+                    varValue = tonumber(varValue)
+                elseif not isSymbolAVariable(varValue) then
+                    varValue = escapeStringValue(varValue)
+                end
             end
-            if globalVariables[varName] == "boolean" then
-                varValue = luna.bool(varValue)
+            if not globalVariables[varName] and isSymbolLookupIteration then
+                -- TODO Add predefined variables bultin in HSC so we can lookup for them as well
+                error("Variable " .. varName .. " has not been declared")
             end
             lua = lua .. varName .. " = " .. tostring(varValue) .. "\n"
         elseif name == "not" then
@@ -560,130 +600,79 @@ local function convertAstToLua(astNode)
                           ", " .. maximumTicks .. ")\n"
             end
         else
-            printd("Args:", inspect(hscArgs))
-            for index, arg in ipairs(hscArgs) do
-                -- Argument is a string value (not a symbol cause it starts with "str_")
-                if type(arg) == "string" then
-                    local argMetadata = table.find(hscDoc.functions, function(doc)
-                        return doc.funcName:trim() == name:trim()
-                    end)
-                    if argMetadata then
-                        printd("Function has metadata", inspect(argMetadata), inspect(hscArgs))
-                        local argType = argMetadata.args[index]
-                        local isVariable = table.find(localVariables, function(v)
-                            return v == arg
-                        end)
-                        isVariable = isVariable or globalVariables[arg]
-                        if isVariable then
-                            printd("Found local variable " .. arg)
+            printd("Symbol:", name, inspect(hscArgs))
+            local hscMetaData = table.find(hscDoc.functions, function(doc)
+                return doc.funcName:trim() == name:trim()
+            end)
+            local symbolPrefix = ""
+            local symbolMiddlefix = ""
+            if hscMetaData then
+                symbolPrefix = "hsc."
+                symbolMiddlefix = "("
+                printd("Type: HSC")
+                printd(inspect(hscMetaData))
+            end
+
+            local staticDefinedData = table.find(userDefinedFunctions, function(doc)
+                return doc.funcName:trim() == name:trim()
+            end)
+            if staticDefinedData then
+                symbolPrefix = "call(" .. args.module .. "."
+                symbolMiddlefix = ""
+                if #table.keys(hscArgs) > 0 then
+                    symbolMiddlefix = ", "
+                end
+                printd("Type: Static")
+                printd(inspect(staticDefinedData))
+            end
+
+            local metaData = hscMetaData or staticDefinedData
+            if metaData then
+                for index, arg in ipairs(hscArgs) do
+                    printd("Arg " .. index .. ": " .. inspect(arg))
+                    if type(arg) == "string" then
+                        local argType = metaData.args[index]
+                        if isSymbolAVariable(arg) then
+                            printd("Arg \"" .. arg .. "\" is a variable, keeping as is")
                             hscArgs[index] = arg
                         else
                             printd("Arg type: " .. argType)
-                            local isNativeType = table.indexof(hscDoc.nativeTypes, argType)
-                            if isNativeType then
-                                printd("Found native type " .. argType)
-                                if argType == "string" then
+                            local isNativeType = table.find(hscDoc.nativeTypes, function(v)
+                                return v == argType
+                            end)
+                            if isNotTranspiledText(arg) then
+                                printd("Arg is not a transpiled value!")
+                                if not isNativeType then
                                     hscArgs[index] = escapeStringValue(arg)
-                                elseif arg:includes "\\" and arg:len() > 1 then
-                                    hscArgs[index] = escapeStringValue(arg)
-                                else
-                                    hscArgs[index] = tostring(arg)
                                 end
-                            elseif arg:includes "\\" and arg:len() > 1 then
-                                hscArgs[index] = escapeStringValue(arg)
-                            else
-                                hscArgs[index] = escapeStringValue(arg)
-                            end
-                        end
-                    else
-                        hscArgs[index] = convertToString(arg)
-                    end
-                elseif type(arg) == "boolean" then
-                    hscArgs[index] = tostring(arg)
-                else
-                    hscArgs[index] = convertAstToLua(arg)
-                end
-            end
-            -- TODO We might want to check this later on, not sure if we will ever need this,
-            -- it all depends if HSC allowed you to create functions with the same names as the
-            -- built-in functions, I highly doubt it but needs checking
-            --
-            -- For example let's assume you have created a script that shares the name of a
-            -- function already defined in HSC or if you name a variable the same as a function
-            -- name, this will cause a conflict and the transpiler will not be able to
-            -- differentiate between the two, so we need to check if HSC allows this as valid
-            -- syntax or not
-            --
-            -- Validate if the function is a user defined function or a built-in function
-            local definedFunction = userDefinedFunctions[name]
-            -- We are calling a user defined function
-            if definedFunction then
-                local functionArgs = definedFunction.args
-                if args.module then
-                    if functionArgs and #table.keys(functionArgs) > 0 then
-                        print("Calling user defined function " .. args.module .. "." .. name)
-                        for index, arg in ipairs(hscArgs) do
-                            -- Argument is a string value (not a symbol cause it starts with "str_")
-                            if type(arg) == "string" then
-                                local argMetadata =
-                                    table.find(userDefinedFunctions, function(doc)
-                                        return doc.funcName:trim() == name:trim()
-                                    end)
-                                if argMetadata then
-                                    print("Function has metadata", inspect(argMetadata),
-                                          inspect(hscArgs))
-                                    local argType = argMetadata.args[index]
-                                    local isVariable =
-                                        table.find(localVariables, function(v)
-                                            return v == arg
-                                        end)
-                                    isVariable = isVariable or globalVariables[arg]
-                                    if isVariable then
-                                        print("Found local variable " .. arg)
-                                        hscArgs[index] = arg
+                                if isNativeType then
+                                    printd("Found native type \"" .. argType .. "\"")
+                                    if argType == "boolean" then
+                                        hscArgs[index] = luna.bool(arg)
+                                    elseif isNumber(arg) then
+                                        hscArgs[index] = tonumber(arg)
                                     else
-                                        print("Arg type: " .. argType)
-                                        local isNativeType =
-                                            table.indexof(hscDoc.nativeTypes, argType)
-                                        if isNativeType then
-                                            print("Found native type " .. argType)
-                                            if argType == "string" then
-                                                hscArgs[index] = escapeStringValue(arg)
-                                            elseif arg:includes "\\" and arg:len() > 1 then
-                                                hscArgs[index] = escapeStringValue(arg)
-                                            else
-                                                hscArgs[index] = tostring(arg)
-                                            end
-                                        elseif arg:includes "\\" and arg:len() > 1 then
-                                            hscArgs[index] = escapeStringValue(arg)
-                                        elseif not arg:includes "not " and not arg:includes "if " and
-                                            not arg:includes "call(" then
-                                            hscArgs[index] = escapeStringValue(arg)
-                                        else
-                                            hscArgs[index] = convertToString(arg)
-                                        end
+                                        hscArgs[index] = escapeStringValue(arg)
                                     end
-                                else
-                                    hscArgs[index] = tostring(arg)
                                 end
-                            elseif type(arg) == "boolean" then
-                                hscArgs[index] = tostring(arg)
-                            else
-                                hscArgs[index] = convertAstToLua(arg)
                             end
                         end
-
-                        lua = lua .. "call(" .. args.module .. "." .. name .. "," ..
-                                  table.concat(hscArgs, ", ") .. ")\n"
-                    else
-                        lua = lua .. "call(" .. args.module .. "." .. name .. ")\n"
+                    elseif type(arg) == "table" then
+                        hscArgs[index] = convertAstToLua(arg)
                     end
-                else
-                    lua = lua .. "call(" .. name .. ")\n"
+                    hscArgs[index] = tostring(hscArgs[index])
+                    printd("Final: " .. inspect(hscArgs[index]))
                 end
+                lua = lua .. symbolPrefix .. name .. symbolMiddlefix .. table.concat(hscArgs, ", ") .. ")\n"
+                printd("------------------------------------------------------------")
             else
-                -- We are calling a built in function
-                lua = lua .. "hsc." .. name .. "(" .. table.concat(hscArgs, ", ") .. ")\n"
+                if args.missing_symbols then
+                    print("Function " .. name .. " not found as a symbol, leaving as comment")
+                    lua = lua .. "--FIXME " .. name .. "(" .. table.concat(hscArgs, ", ") ..
+                              ")\n"
+                else
+                    error("Function \"" .. name .. "\" not found as a symbol")
+                end
             end
         end
     end
@@ -707,11 +696,11 @@ assert(hscInput, "Error reading HSC file")
 hscInput = hscInput:gsub(";[^\n]*", "")
 local hsc = parser:match(hscInput)
 
-printd("------------------- AST -------------------------------")
-printd(inspect(hsc))
+-- printd("------------------- AST -------------------------------")
+-- printd(inspect(hsc))
 
 local lua = convertAstToLua(hsc)
-if not isSymbolLookupDone then
+if not isSymbolLookupIteration then
     lua = ""
     hsc = parser:match(hscInput)
     -- FIXME This is a workaround to prevent transpiler from wrongly assuming that symbols that
@@ -721,8 +710,8 @@ if not isSymbolLookupDone then
     --
     -- We should split this into two phases so we can predeclare all symbols such as scripts and
     -- variables that will be declared at some point in the scripts but are referenced earlier
+    isSymbolLookupIteration = true
     lua = convertAstToLua(hsc)
-    isSymbolLookupDone = true
 end
 
 local header = [[---------- Transpiled from HSC to Lua ----------
@@ -747,8 +736,8 @@ if args.module then
 end
 
 if args.debug then
-    print("-------------------- AST -> LUA ------------------------------")
-    print(lua)
+    -- print("-------------------- AST -> LUA ------------------------------")
+    -- print(lua)
 end
 
 -- local split = args.input:replace("\\", "/"):split("/")
