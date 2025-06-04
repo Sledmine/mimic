@@ -27,7 +27,7 @@
 -- This variables will be used later on as some cache variables to store values so we can execute
 -- HSC using built in functions from the game and store the actual results from these and get them
 -- back to Lua again and into the game.
-local lpeg = require "lpeg"
+local lpeg = require "lua.modules.lulpeg"
 local P, R, S = lpeg.P, lpeg.R, lpeg.S -- patterns
 local C, Ct = lpeg.C, lpeg.Ct -- capture
 local V = lpeg.V -- variable
