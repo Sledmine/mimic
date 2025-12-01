@@ -43,6 +43,7 @@ parser:flag("--debug", "Enable debug mode")
 parser:option("-m --module", "Write script as a module with a given name")
 parser:flag("--unwrap-begin", "Do not unwrap begin blocks", false)
 parser:flag("--missing-symbols", "Ignore missing symbols in the transpiled code", false)
+parser:flag("--undefined-vars", "Allow usage of undefined variables without error", false)
 
 local args = parser:parse()
 
@@ -210,7 +211,11 @@ local function convertAstToLua(astNode)
             end
             if not globalVariables[varName] and isSymbolLookupIteration then
                 -- TODO Add predefined variables bultin in HSC so we can lookup for them as well
-                error("Variable " .. varName .. " has not been declared")
+                if args.undefined_vars then
+                    print("WARNING: Variable \"" .. varName .. "\" has not been declared!")
+                else
+                    error("Variable \"" .. varName .. "\" has not been declared before usage!")
+                end
             end
             lua = lua .. varName .. " = " .. tostring(varValue) .. "\n"
         elseif name == "not" then
@@ -232,6 +237,20 @@ local function convertAstToLua(astNode)
             end
             if type(var2) == "table" then
                 var2 = convertAstToLua(var2)
+            end
+            local isVar1AVariable = isSymbolAVariable(var1)
+            if isVar1AVariable then
+                if globalVariables[var1] == "boolean" and isNotTranspiledText(var2) then
+                    ---@diagnostic disable-next-line: param-type-mismatch
+                    var2 = luna.bool(var2)
+                end
+            end
+            local isVar2AVariable = isSymbolAVariable(var2)
+            if isVar2AVariable then
+                if globalVariables[var2] == "boolean" and isNotTranspiledText(var2) then
+                    ---@diagnostic disable-next-line: param-type-mismatch
+                    var2 = luna.bool(var2)
+                end
             end
             lua = lua .. tostring(var1) .. " == " .. tostring(var2) .. "\n"
         elseif name == "if" then
@@ -663,13 +682,14 @@ local function convertAstToLua(astNode)
                     hscArgs[index] = tostring(hscArgs[index])
                     printd("Final: " .. inspect(hscArgs[index]))
                 end
-                lua = lua .. symbolPrefix .. name .. symbolMiddlefix .. table.concat(hscArgs, ", ") .. ")\n"
+                lua =
+                    lua .. symbolPrefix .. name .. symbolMiddlefix .. table.concat(hscArgs, ", ") ..
+                        ")\n"
                 printd("------------------------------------------------------------")
             else
                 if args.missing_symbols then
                     print("Function " .. name .. " not found as a symbol, leaving as comment")
-                    lua = lua .. "--FIXME " .. name .. "(" .. table.concat(hscArgs, ", ") ..
-                              ")\n"
+                    lua = lua .. "--FIXME " .. name .. "(" .. table.concat(hscArgs, ", ") .. ")\n"
                 else
                     error("Function \"" .. name .. "\" not found as a symbol")
                 end

@@ -4,5 +4,3 @@
 (global real lua_real 0)
 (global string lua_string "")
 (global unit lua_unit none)
-(global object lua_object none)
-(global object_list lua_object_list none)
