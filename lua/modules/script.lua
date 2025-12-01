@@ -153,9 +153,12 @@ function script.thread(func, metadata)
             -- This case is usually just executed when you are trying to call a function immediately
             -- while sleeping, so is somewhat safe to assume "call" and "sleep" are not being used.
             -- 
-            -- error("Cannot call a function while another function is being called", 2)/
-            return funcToCall(function ()
-                logger:error("Cannot call a function while another function is being called")
+            return funcToCall(function (func, ...)
+                --error("Cannot call a function while another function is being called", 2)
+                logger:debug("Cannot call a function while another function is being called")
+
+                -- Just return the function result directly, we cannot yield here
+                return func(...)
             end, function ()
                 logger:error("Cannot sleep while another function is being called")
             end, ...)
