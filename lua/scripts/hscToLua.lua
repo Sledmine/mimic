@@ -144,6 +144,14 @@ local function isSymbolAVariable(symbol)
     return isVariable
 end
 
+local function isInvalidSymbolName(symbol)
+    -- Check if the symbol has any leading number or special character
+    if symbol:find("^[0-9]") or symbol:find("^[^%a_]") then
+        return true
+    end
+    return false
+end
+
 local function isNumber(v)
     -- Check if the value is a number
     if type(v) == "number" then
@@ -488,9 +496,15 @@ local function convertAstToLua(astNode)
             local scriptBody = hscArgs[3]
             local scriptReturnType
             local scriptArgs
+            if isInvalidSymbolName(scriptName) then
+                scriptName = "_" .. scriptName
+            end
             if scriptType == "static" or scriptType == "stub" then
                 scriptReturnType = hscArgs[2]
                 scriptName = hscArgs[3]
+                if isInvalidSymbolName(scriptName) then
+                    scriptName = "_" .. scriptName
+                end
                 scriptBody = hscArgs[4]
                 -- Script has arguments
                 if type(scriptName) == "table" then
@@ -573,6 +587,9 @@ local function convertAstToLua(astNode)
             lua = lua .. "\n"
         elseif name == "wake" then
             local scriptName = hscArgs[1]
+            if isInvalidSymbolName(scriptName) then
+                scriptName = "_" .. scriptName
+            end
             if args.module then
                 lua = lua .. "wake(" .. args.module .. "." .. scriptName .. ")\n"
             else
@@ -646,6 +663,11 @@ local function convertAstToLua(astNode)
             end
 
             local metaData = hscMetaData or staticDefinedData
+            -- If name has any leading number or special character, it is not a valid symbol
+            -- We need to convert it to have a leading _ char 
+            if isInvalidSymbolName(name) then
+                name = "_" .. name
+            end
             if metaData then
                 for index, arg in ipairs(hscArgs) do
                     printd("Arg " .. index .. ": " .. inspect(arg))
