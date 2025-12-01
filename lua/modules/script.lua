@@ -106,7 +106,11 @@ local function handleScriptThread(scriptThread, result)
         else
             removeThreadFromTrace(scriptThread)
             if scriptThread.parent then
-                handleScriptThread(scriptThread.parent, threadResult)
+                local result = pcall(handleScriptThread, scriptThread.parent, threadResult)
+                if not result then
+                    --error(debug.traceback(scriptThread.parent.thread), 2)
+                    logger:error(debug.traceback(scriptThread.parent.thread))
+                end
             end
         end
     end
@@ -206,7 +210,7 @@ function script.thread(func, metadata)
         local ok, result = coroutine.resume(scriptThread.thread, call, sleep,
                                             table.unpack(parentScriptThread.args or {}))
         if not ok then
-            error(result, 2)
+            error(debug.traceback(scriptThread.thread, result), 2)
         end
         return result
     end
@@ -220,6 +224,7 @@ function script.startup(func)
     local foundScript = findScriptThreadByFunc(func)
     if foundScript then
         logger:error("Tried to add a script that already exists.")
+        logger:debug("Existing script trace: {}", debug.traceback(foundScript.thread))
         return
     end
     local metadata = {type = "startup"}
@@ -230,6 +235,7 @@ function script.continuous(func)
     local foundScript = findScriptThreadByFunc(func)
     if foundScript then
         logger:error("Tried to add a script that already exists.")
+        logger:debug("Existing script trace: {}", debug.traceback(foundScript.thread))
         return
     end
     local metadata = {type = "continuous"}
