@@ -11,7 +11,7 @@ function PluginMetadata()
     return {
         name = "Mimic",
         author = "Sledmine",
-        version = "3.0.7",
+        version = "4.0.0",
         targetApi = "1.2.0",
         reloadable = true
     }
