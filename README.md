@@ -9,7 +9,7 @@
 </html>
 
 Network Sync for Halo Custom Edition, a project that aims to provide Object / AI synchronization in the most
-optimized and simple way as possible, made with Lua using Balltze, SAPP and Chimera.
+optimized and simple way as possible, made with Lua using Balltze and SAPP.
 
 # Getting Mimic
 Get the latest version of the mod using the Mercury command:
@@ -22,8 +22,9 @@ and script events, by providing a server script that tracks all the data of ever
 sync using Lua scripting on the server side and sending that information back to the client players
 connected to the server that need that information depending on the situation.
 
-**NOTE:** By now script events only can be synced by recompiling target map HSC using an script
-rewriter via the **Mimic Adapter Tool**.
+**NOTE:** HSC scripts only can be synced by transpiling HSC scripts to Lua using the new
+transpiler script, check the [HSC Transpiler](https://github.com/Sledmine/coop-evolved/blob/1.10.0/docs/PORTING_MAPS.md)
+documentation for more information about how to use it.
 
 # Features
 - [x] Matches server side bipeds to client side bipeds
@@ -37,6 +38,7 @@ rewriter via the **Mimic Adapter Tool**.
 - [x] Script events sync (only on recompiled maps)
 - [ ] Object special properties sync (such as levitate, shield, camera, etc)
 - [ ] Object client side patching (allow sounds being played on client side)
+- [ ] Full vehicle sync (position, rotation, driver and passengers)
 
 # Can I contribute/help?
 This project is on early development, feel free to contribute and join our [Discord server](https://discord.shadowmods.net)
