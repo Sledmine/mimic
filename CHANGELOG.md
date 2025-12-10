@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.0.0] - 2025-12-09
+### Added
+- Add support for syncing HSC functions and events with new transpiler event layer
+- Add HSC transpiler script and hs thread module bridge for scripting integration support (more of a dev feature, check README for more info)
+
+### Fixed
+- Incremental Memory leak when syncing large number of bipeds over time
+- Units will now sync animation tag handle as well as animation index, preventing wrong animations being played on client side
+- Bipeds considered as dead will no longer enter a seizure state and loop animations, still can not fake dead, will stay dead until garbage collected
+
+### Changed
+- Vehicle parent object handle is not synced anymore, due to game not being able to dettach parent objects in multiplayer games, will fix later
+
 ## [3.0.6] - 2024-06-18
 ### Fixed
 - Most recent damager player value being modified following an old coop evolved logic
