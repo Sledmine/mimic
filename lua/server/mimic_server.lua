@@ -308,7 +308,6 @@ function OnMapLoad()
     if DebugMode then
         set_timer(5000, "ShowCurrentSyncedObjects")
     end
-    resetState()
     logger:info("Mimic version: {}", version)
     currentScenario = blam.scenario(0)
     assert(currentScenario, "No current scenario tag found")
@@ -372,15 +371,15 @@ function OnTick()
                             -- Update last power state
                             deviceMachinesList[objectId].power = power
 
-                            local command = "sync_device_set_power \"{name}\" {power}"
-                            broadcastMessage(command:template(t))
+                            local message = "sync_device_set_power \"{name}\" {power}"
+                            broadcastMessage(message:template(t))
                         end
                         if position and position ~= group.position then
                             -- Update last position state
                             deviceMachinesList[objectId].position = position
 
-                            local command = "sync_device_set_position \"{name}\" {position}"
-                            broadcastMessage(command:template(t))
+                            local message = "sync_device_set_position \"{name}\" {position}"
+                            broadcastMessage(message:template(t))
                         end
                     end
                 end
