@@ -16,7 +16,7 @@ local fmod = math.fmod
 local rad = math.rad
 local deg = math.deg
 
-local blam = {_VERSION = "1.15.0"}
+local blam = {_VERSION = "1.16.0"}
 
 ------------------------------------------------------------------------------
 -- Useful functions for internal usage
@@ -110,7 +110,6 @@ end
 -- Engine address list
 local addressList = {
     tagDataHeader = 0x40440000,
-    cameraType = 0x00647498, -- from giraffe
     gamePaused = 0x004ACA79,
     gameOnMenus = 0x00622058,
     joystickInput = 0x64D998, -- from aLTis
@@ -123,7 +122,9 @@ local addressList = {
     screenResolution = 0x637CF0,
     currentWidgetIdAddress = 0x6B401C,
     cinematicGlobals = 0x0068c83c,
-    gameStateGlobals = 0x0064bab0
+    hscGlobalsPointer = 0x0064bab0,
+    cameraState = 0x00647498,
+    objectNamesList = 0x00653be8
 }
 
 -- Server side addresses adjustment
@@ -132,8 +133,9 @@ if blam.isGameSAPP() then
     addressList.objectTable = 0x4005062C
     addressList.syncedNetworkObjects = 0x00598020 -- not pointer cause cheat engine sucks
     addressList.cinematicGlobals = 0x005f506c
-    addressList.gameStateGlobals = 0x005bd890
+    addressList.hscGlobalsPointer = 0x005bd890
     addressList.hscGlobals = 0x6e144c
+    addressList.cameraState = 0x5b9278
 end
 
 -- Tag classes values
@@ -444,6 +446,16 @@ backupFunctions.file_exists = _G.file_exists
 ---@param z number
 ---@return number? objectId
 function spawn_object(tagClass, tagPath, x, y, z)
+    if type(tagClass) == "number" then
+        local x = tagPath --[[@as number]]
+        local y = x
+        local z = y
+        local tag = blam.getTag(tagClass)
+        if tag then
+            return backupFunctions.spawn_object(tag.class, tag.path, x, y, z)
+        end
+    end
+    return backupFunctions.spawn_object(tagClass, tagPath, x, y, z)
 end
 
 ---Attempt to get the address of a player unit object given player index, returning nil on failure.<br>
@@ -453,7 +465,6 @@ end
 function get_dynamic_player(playerIndex)
 end
 
-spawn_object = backupFunctions.spawn_object
 get_dynamic_player = backupFunctions.get_dynamic_player
 
 ------------------------------------------------------------------------------
@@ -644,7 +655,7 @@ end
 function get_global(globalName)
     if addressList.hscGlobals then
         local hsGlobals = addressList.hscGlobals
-        --local firstGlobal = read_dword(addressList.hscGlobals + 1)
+        -- local firstGlobal = read_dword(addressList.hscGlobals + 1)
         local firstGlobal = 0x00001ec
         local hsGlobalsTable = read_dword(hsGlobals)
         local hsTable = read_dword(hsGlobalsTable + 0x34)
@@ -1000,15 +1011,17 @@ function blam.readUnicodeString(address, rawRead)
     else
         stringAddress = read_dword(address)
     end
-    local length = stringAddress / 2
     local output = ""
-    -- TODO Refactor this to support full unicode char size
-    for i = 1, length do
-        local char = read_string(stringAddress + (i - 1) * 0x2)
-        if char == "" then
+    local i = 0
+    -- TODO Refactor this to support reading ASCII and UTF16? strings
+    while true do
+        local char = read_string(stringAddress + i * 0x2)
+        -- local _, char = pcall(string.char, read_byte(stringAddress + (i - 1) * 0x2))
+        if not char or char == "" then
             break
         end
         output = output .. char
+        i = i + 1
     end
     return output
 end
@@ -1017,7 +1030,8 @@ end
 ---@param address number
 ---@param newString string
 ---@param rawWrite? boolean
-function blam.writeUnicodeString(address, newString, rawWrite)
+---@param noNullTerminator? boolean
+function blam.writeUnicodeString(address, newString, rawWrite, noNullTerminator)
     local stringAddress
     if rawWrite then
         stringAddress = address
@@ -1029,15 +1043,18 @@ function blam.writeUnicodeString(address, newString, rawWrite)
         return
     end
     local newString = tostring(newString)
-    -- TODO Refactor this to support writing ASCII and Unicode strings
+    -- TODO Refactor this to support writing ASCII and UTF16? strings
     for i = 1, #newString do
-        write_string(stringAddress + (i - 1) * 0x2, newString:sub(i, i))
-        if i == #newString then
-            write_byte(stringAddress + #newString * 0x2, 0x0)
+        local char = newString:sub(i, i)
+        local byte = string.byte(char) or string.byte("?")
+        local currentCharAddress = stringAddress + (i - 1) * 0x2
+        write_dword(currentCharAddress, byte)
+        if i == #newString and not noNullTerminator then
+            write_dword(currentCharAddress + 0x2, 0x0)
         end
     end
     if #newString == 0 then
-        write_string(stringAddress, "")
+        write_dword(stringAddress, 0)
     end
 end
 
@@ -1158,11 +1175,16 @@ end
 
 local function safeWriteUnicodeString(address, propertyData, text)
     local size = read_dword(address)
-    local text = text
-    if #text > size then
-        text = text:sub(1, size)
+    local newText = text
+    local maximumStringSize = size - 2
+    if #text * 2 >= maximumStringSize then
+        newText = newText:sub(1, maximumStringSize / 2)
+        -- String is too long, truncate it and write it without null terminator
+        return blam.writeUnicodeString(address + 0xC, newText, false, true)
     end
-    return blam.writeUnicodeString(address + 0xC, text)
+    -- String is short enough, write it with null terminator
+    -- This will ignore rest of the string if it was longer than new string size
+    return blam.writeUnicodeString(address + 0xC, newText, false, false)
 end
 
 -- Data types operations references
@@ -2266,6 +2288,7 @@ local modelAnimationsStructure = {
 ---@field primaryTriggerState number Primary trigger state of the weapon
 ---@field totalAmmo number Total ammo of the weapon
 ---@field loadedAmmo number Loaded ammo of the weapon   
+---@field reloadTicksRemainingFirstMagazine number Remaining ticks for weapon to finish reload (1st magazine)
 
 local weaponStructure = extendStructure(objectStructure, {
     pressedReloadKey = {type = "bit", offset = 0x230, bitLevel = 3},
@@ -2275,7 +2298,8 @@ local weaponStructure = extendStructure(objectStructure, {
     isInInventory = {type = "bit", offset = 0x1F4, bitLevel = 0},
     primaryTriggerState = {type = "byte", offset = 0x261},
     totalAmmo = {type = "word", offset = 0x2B6},
-    loadedAmmo = {type = "word", offset = 0x2B8}
+    loadedAmmo = {type = "word", offset = 0x2B8},
+    reloadTicksRemainingFirstMagazine = {type = "word", offset = 0x23A}
 })
 
 ---@class weaponTag
@@ -2568,12 +2592,53 @@ local hudGlobalsStructure = {
 }
 
 ---@class cinematicGlobals
----@field isInProgress boolean
 ---@field isShowingLetterbox boolean
+---@field isInProgress boolean
+---@field isSkipInProgress boolean
+---@field isSupressBspObjectCreation boolean
 
 local cinematicGlobalsStructure = {
+    isShowingLetterbox = {type = "bit", offset = 0x8, bitLevel = 0},
     isInProgress = {type = "bit", offset = 0x9, bitLevel = 0},
-    isShowingLetterbox = {type = "bit", offset = 0x8, bitLevel = 0}
+    isSkipInProgress = {type = "bit", offset = 0xa, bitLevel = 0},
+    isSupressBspObjectCreation = {type = "bit", offset = 0xb, bitLevel = 0}
+}
+
+---@class cameraState
+---@field type number Camera type
+---@field x number Camera x position
+---@field y number Camera y position
+---@field z number Camera z position
+---@field devcamX number Devcam x position
+---@field devcamY number Devcam y position
+---@field devcamZ number Devcam z position
+---@field finalX number Final x position
+---@field finalY number Final y position
+---@field finalZ number Final z position
+---@field vX number Camera vector x rotation
+---@field vY number Camera vector y rotation
+---@field vZ number Camera vector z rotation
+---@field v2X number Camera second vector x rotation
+---@field v2Y number Camera second vector y rotation
+---@field v2Z number Camera second vector z rotation
+
+local cameraStateStructure = {
+    type = {type = "word", offset = 0x0},
+    devcamX = {type = "float", offset = 0x54},
+    devcamY = {type = "float", offset = 0x58},
+    devcamZ = {type = "float", offset = 0x5C},
+    finalX = {type = "float", offset = 0x100},
+    finalY = {type = "float", offset = 0x104},
+    finalZ = {type = "float", offset = 0x108},
+    x = {type = "float", offset = 0x168},
+    y = {type = "float", offset = 0x16C},
+    z = {type = "float", offset = 0x170},
+    vX = {type = "float", offset = 0x120},
+    vY = {type = "float", offset = 0x124},
+    vZ = {type = "float", offset = 0x128},
+    v2X = {type = "float", offset = 0x12C},
+    v2Y = {type = "float", offset = 0x130},
+    v2Z = {type = "float", offset = 0x134}
 }
 
 ------------------------------------------------------------------------------
@@ -2614,7 +2679,7 @@ blam.null = null
 ---Get the current game camera type
 ---@return number?
 function blam.getCameraType()
-    local camera = read_word(addressList.cameraType)
+    local camera = read_word(addressList.cameraState)
     if camera then
         if camera == 22192 then
             return cameraTypes.scripted
@@ -3017,14 +3082,14 @@ function blam.getObject(idOrIndex)
     local objectAddress
 
     -- Get object address
-    if (idOrIndex) then
+    if idOrIndex then
         -- Get object ID
-        if (idOrIndex < 0xFFFF) then
+        if idOrIndex < 0xFFFF then
             local index = idOrIndex
 
             -- Get objects table
             local table = createBindTable(addressList.objectTable, dataTableStructure)
-            if (index > table.capacity) then
+            if index > table.capacity then
                 return nil
             end
 
@@ -3476,8 +3541,53 @@ end
 --- Returns current game difficulty index
 ---@return number
 function blam.getGameDifficultyIndex()
-    local hscGlobals = read_dword(addressList.gameStateGlobals)
+    local hscGlobals = read_dword(addressList.hscGlobalsPointer)
     return read_byte(hscGlobals + 0xe)
+end
+
+--- Returns current game camera state
+---@return cameraState
+function blam.getCameraState()
+    return createBindTable(addressList.cameraState, cameraStateStructure)
+end
+
+--- Get or set object handle in global object name list
+---@overload fun(index: number, handle?: number): number?
+---@param objectName string
+---@param handle? number
+---@return number?
+function blam.objectNameHandle(objectName, handle)
+    local nameIndex
+
+    if type(objectName) == "number" then
+        -- If index is provided, use it directly
+        nameIndex = objectName
+    else
+        -- Find the index of the object name in the scenario object names list
+        local scenario = blam.scenario(0)
+        assert(scenario, "No scenario loaded, can't get object names list.")
+        if scenario then
+            local objectNamesList = scenario.objectNames
+            for index, name in pairs(objectNamesList) do
+                if name == objectName then
+                    nameIndex = index
+                    break
+                end
+            end
+        end
+    end
+    if not nameIndex then
+        error("Object name \"" .. objectName .. "\" not found in scenario object names list.")
+    end
+
+    local objectNamesListAddress = read_dword(addressList.objectNamesList)
+    if handle then
+        -- Set the object handle in the global object name list
+        write_dword(objectNamesListAddress + (nameIndex * 4), handle)
+    else
+        -- Get the object handle from the global object name list
+        return read_dword(objectNameListAddress + (nameIndex * 4))
+    end
 end
 
 return blam
