@@ -1,6 +1,6 @@
 return {
     -- Distance at which an AI will be synced to a player
-    syncDistance = 100,
+    syncDistance = 80,
     -- Sync custom messages every 33ms
     syncEveryMillisecs = 33,
     -- Bounding used to determine if a player is looking close enough to an AI to sync

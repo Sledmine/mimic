@@ -4,8 +4,14 @@ package.preload["luna"] = nil
 package.loaded["luna"] = nil
 require "luna"
 local commands = require "mimic.commands"
+local script = require "script"
+
+DebugMode = false
+DebugLevel = 1
+IsSyncEnabled = true
 
 local main
+local isNewMap = true
 
 function PluginMetadata()
     return {
@@ -47,11 +53,6 @@ local function loadChimeraCompatibility()
     execute_script = engine.hsc.executeScript
 end
 
-DebugMode = false
-DebugLevel = 1
-IsSyncEnabled = true
-local isNewMap = true
-local main
 
 function PluginLoad()
     logger = balltze.logger.createLogger("Mimic")
@@ -65,6 +66,7 @@ function PluginLoad()
 
     balltze.event.tick.subscribe(function(event)
         if event.time == "after" then
+            script.poll()
             if not isChimeraLoaded and balltze.chimera then
                 logger:debug("Chimera compatibility loaded")
                 loadChimeraCompatibility()

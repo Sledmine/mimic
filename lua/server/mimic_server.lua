@@ -32,30 +32,18 @@ local version = require "mimic.version"
 -- Settings
 DebugMode = false
 local bspIndexAddress = 0x40002CD8
-local passwordAddress
+local rconPasswordAddress
 local failMessageAddress
 local allowClientSideWeaponProjectilesAddress
-local serverRcon
+local rconPassword
 
 -- State
-VehiclesList = {} -- Global cause we need to access it from core module
 local deviceMachinesList = {}
 LastSyncCommand = ""
 local currentBspIndex
 local currentScenario = nil
 
 logger = Balltze.logger.createLogger("Mimic Server")
-
----Log to console
----@param type "info" | "error" | "warning" | "debug"
-local function log(type, message)
-    if not DebugMode and type == "debug" then
-        return
-    end
-    -- Use ASCII color codes for console output
-    local color = {info = 2, error = 4, warning = 6, debug = 3}
-    console_out("[" .. type:upper() .. "] " .. message, color[type])
-end
 
 ---Enable or disable server side projectiles synchronization
 ---@param enable boolean
@@ -67,7 +55,7 @@ local function serverSideProjectiles(enable)
     write_byte(allowClientSideWeaponProjectilesAddress, enable and 0x0 or 0x1)
 end
 
-function Broadcast(message)
+local function broadcastMessage(message)
     for playerIndex = 1, 16 do
         if player_present(playerIndex) then
             rprint(playerIndex, message)
@@ -76,9 +64,22 @@ function Broadcast(message)
     return false
 end
 
-function Send(playerIndex, message)
+function monocastMessage(playerIndex, message)
     rprint(playerIndex, message)
     return false
+end
+
+local function getBspIndex()
+    return read_byte(bspIndexAddress)
+end
+
+local function syncBspIndex(playerIndex)
+    local bspIndex = getBspIndex() or 0
+    if not playerIndex then
+        broadcastMessage("sync_switch_bsp " .. bspIndex)
+        return
+    end
+    monocastMessage(playerIndex, "sync_switch_bsp " .. bspIndex)
 end
 
 function SyncGameState(playerIndex)
@@ -90,10 +91,16 @@ function SyncGameState(playerIndex)
                 assert(currentScenario, "No current scenario tag found")
                 local name = currentScenario.objectNames[device.nameIndex + 1]
                 if name then
-                    Send(playerIndex, "sync_device_set_power " .. name .. " " ..
-                             deviceMachinesList[objectId].power)
-                    Send(playerIndex, "sync_device_set_position_immediate " .. name .. " " ..
-                             deviceMachinesList[objectId].position)
+                    local power = deviceMachinesList[objectId].power
+                    local position = deviceMachinesList[objectId].position
+
+                    local powerMessage = "device_set_power \"{name}\" {power}"
+                    powerMessage = powerMessage:template{name = name, power = power}
+                    monocastMessage(playerIndex, "sync_" .. powerMessage)
+
+                    local positionMessage = "device_set_position_immediate \"{name}\" {position}"
+                    positionMessage = positionMessage:template{name = name, position = position}
+                    monocastMessage(playerIndex, "sync_" .. positionMessage)
                 end
             end
         end
@@ -117,14 +124,16 @@ local function updateNetworkObject(playerIndex, unit, serverObjectId, syncedInde
     --    aiWeapon.totalAmmo = 999
     -- end
     -- Sync AI biped if it is near to the player
+    local cinematicGlobals = blam.cinematicGlobals()
     if isNull(player.vehicleObjectId) then
-        if (core.objectIsNearTo(player, unit, constants.syncDistance) and
-            core.objectIsLookingAt(get_dynamic_player(playerIndex) --[[@as number]] ,
-                                   serverObjectId, constants.syncBoundingRadius, 0,
-                                   constants.syncDistance)) then
+        if cinematicGlobals.isInProgress or
+            (core.objectIsNearTo(player, unit, constants.syncDistance) and
+                core.objectIsLookingAt(get_dynamic_player(playerIndex) --[[@as number]] ,
+                                       serverObjectId, constants.syncBoundingRadius, 0,
+                                       constants.syncDistance)) then
             local updatePacket = core.updateObjectPacket(syncedIndex, unit)
             if updatePacket and syncedIndex then
-                Send(playerIndex, updatePacket)
+                monocastMessage(playerIndex, updatePacket)
             end
         end
     else
@@ -132,7 +141,7 @@ local function updateNetworkObject(playerIndex, unit, serverObjectId, syncedInde
         if vehicle and core.objectIsNearTo(vehicle, unit, constants.syncDistance) then
             local updatePacket = core.updateObjectPacket(syncedIndex, unit)
             if updatePacket and syncedIndex then
-                Send(playerIndex, updatePacket)
+                monocastMessage(playerIndex, updatePacket)
             end
         end
     end
@@ -142,13 +151,11 @@ end
 ---Syncs game data required just when the game starts
 ---@param playerIndex number
 ---@return boolean repeat
-function SyncGameStart(playerIndex)
+function SyncGameCoreState(playerIndex)
     -- Sync current bsp
-    if currentBspIndex then
-        Send(playerIndex, "sync_switch_bsp " .. currentBspIndex)
-    end
+    syncBspIndex(playerIndex)
     -- Force client to allow going trough bipeds
-    Send(playerIndex, "disable_biped_collision")
+    monocastMessage(playerIndex, "disable_biped_collision")
     return false
 end
 
@@ -167,18 +174,18 @@ function SyncUpdate(playerIndex)
 
                 local lastObjectState = lastObjectStatePerPlayer[playerIndex][syncedIndex] or {}
                 if object.shaderPermutationIndex ~= lastObjectState.shaderPermutationIndex then
-                    Send(playerIndex, core.objectColorPacket(syncedIndex, object))
+                    monocastMessage(playerIndex, core.objectColorPacket(syncedIndex, object))
                 end
 
                 if core.unitPropertiesShouldBeSynced(unit, lastObjectState) then
                     lastObjectState = blam.dumpObject(unit)
                     lastObjectStatePerPlayer[playerIndex][syncedIndex] = lastObjectState
-                    Send(playerIndex, core.unitPropertiesPacket(syncedIndex, unit))
+                    monocastMessage(playerIndex, core.unitPropertiesPacket(syncedIndex, unit))
 
                     if object.class == objectClasses.biped then
                         local biped = blam.biped(object.address)
                         assert(biped, "Biped cast failed")
-                        Send(playerIndex, core.bipedPropertiesPacket(syncedIndex, biped))
+                        monocastMessage(playerIndex, core.bipedPropertiesPacket(syncedIndex, biped))
                     end
                 end
             end
@@ -237,7 +244,7 @@ end
 
 function OnPlayerJoin(playerIndex)
     -- Sync game data just required when the game starts
-    set_timer(constants.startSyncingAfterMillisecs, "SyncGameStart", playerIndex)
+    set_timer(constants.startSyncingAfterMillisecs, "SyncGameCoreState", playerIndex)
 
     -- Sync game state
     set_timer(constants.startSyncingAfterMillisecs, "SyncGameState", playerIndex)
@@ -257,12 +264,15 @@ end
 function OnPlayerDead(deadPlayerIndex)
 end
 
-function ResetState()
-    VehiclesList = {}
+function resetState()
+    deviceMachinesList = {}
+    LastSyncCommand = ""
+    currentBspIndex = nil
+    currentScenario = nil
 end
 
 function OnGameEnd()
-    ResetState()
+    resetState()
 end
 
 function ShowCurrentSyncedObjects(printTable)
@@ -294,11 +304,11 @@ function ShowCurrentSyncedObjects(printTable)
     return true
 end
 
-function OnGameStart()
+function OnMapLoad()
     if DebugMode then
         set_timer(5000, "ShowCurrentSyncedObjects")
     end
-
+    resetState()
     logger:info("Mimic version: {}", version)
     currentScenario = blam.scenario(0)
     assert(currentScenario, "No current scenario tag found")
@@ -312,11 +322,11 @@ end
 
 function OnTick()
     -- Check for BSP Changes
-    local bspIndex = read_byte(bspIndexAddress)
+    local bspIndex = getBspIndex()
     if bspIndex ~= currentBspIndex then
         currentBspIndex = bspIndex
         logger:debug("New bsp index detected: {}", currentBspIndex)
-        Broadcast("sync_switch_bsp " .. currentBspIndex)
+        syncBspIndex()
     end
 
     for playerIndex = 1, 16 do
@@ -362,15 +372,15 @@ function OnTick()
                             -- Update last power state
                             deviceMachinesList[objectId].power = power
 
-                            local command = "sync_device_set_power {name} {power}"
-                            Broadcast(command:template(t))
+                            local command = "sync_device_set_power \"{name}\" {power}"
+                            broadcastMessage(command:template(t))
                         end
                         if position and position ~= group.position then
                             -- Update last position state
                             deviceMachinesList[objectId].position = position
 
-                            local command = "sync_device_set_position {name} {position}"
-                            Broadcast(command:template(t))
+                            local command = "sync_device_set_position \"{name}\" {position}"
+                            broadcastMessage(command:template(t))
                         end
                     end
                 end
@@ -409,9 +419,9 @@ function OnCommand(playerIndex, command, environment, rconPassword)
                 if biped then
                     local tag = blam.getTag(biped.tagId)
                     assert(tag, "Biped tag not found")
-                    Send(playerIndex, tag.path .. " - HP: " .. biped.health)
+                    monocastMessage(playerIndex, tag.path .. " - HP: " .. biped.health)
                 else
-                    Send(playerIndex, "Warning, biped does not exist on the server.")
+                    monocastMessage(playerIndex, "Warning, biped does not exist on the server.")
                 end
                 return false
             end
@@ -420,28 +430,28 @@ function OnCommand(playerIndex, command, environment, rconPassword)
 end
 
 function OnScriptLoad()
-    passwordAddress = read_dword(sig_scan("7740BA??????008D9B000000008A01") + 0x3)
+    core.patchPlayerConnectionTimeout()
+    rconPasswordAddress = read_dword(sig_scan("7740BA??????008D9B000000008A01") + 0x3)
     failMessageAddress = read_dword(sig_scan("B8????????E8??000000A1????????55") + 0x1)
     allowClientSideWeaponProjectilesAddress = read_dword(sig_scan("803D????????01741533C0EB") + 0x2)
-    if passwordAddress and failMessageAddress then
+    if rconPasswordAddress and failMessageAddress then
         -- Remove "rcon command failure" message
         safe_write(true)
         write_byte(failMessageAddress, 0x0)
         safe_write(false)
         -- Read current rcon in the server
-        serverRcon = read_string(passwordAddress)
-        if serverRcon then
-            cprint("Server rcon password is: \"" .. serverRcon .. "\"")
+        rconPassword = read_string(rconPasswordAddress)
+        if rconPassword then
+            cprint("Server rcon password is: \"" .. rconPassword .. "\"")
         else
             cprint("Error, at getting server rcon, please set and enable rcon on the server.")
         end
     else
         cprint("Error, at obtaining rcon patches, please check SAPP version.")
     end
-    ResetState()
 
     -- Set server callback
-    register_callback(cb["EVENT_GAME_START"], "OnGameStart")
+    register_callback(cb["EVENT_GAME_START"], "OnMapLoad")
     register_callback(cb["EVENT_GAME_END"], "OnGameEnd")
     register_callback(cb["EVENT_OBJECT_SPAWN"], "OnObjectSpawn")
     register_callback(cb["EVENT_JOIN"], "OnPlayerJoin")
@@ -461,9 +471,7 @@ end
 function OnObjectSpawn(playerIndex, tagId, parentId, objectId)
     local tag = blam.getTag(tagId)
     if tag then
-        if tag.class == tagClasses.vehicle then
-            VehiclesList[objectId] = tagId
-        elseif tag.class == tagClasses.deviceMachine then
+        if tag.class == tagClasses.deviceMachine then
             deviceMachinesList[objectId] = {power = -1, position = -1}
         end
     end
@@ -482,7 +490,7 @@ end
 
 -- Log traceback for debug purposes
 function OnError(message)
-    log("error", message)
+    logger:error("An error occurred: {}", message)
     local tb = debug.traceback()
     print(tb)
     say_all("An error is ocurring on the server side, tell a developer to check the logs.")

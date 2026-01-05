@@ -17,6 +17,9 @@ local strpack = string.pack
 local strunpack = string.unpack
 local concat = table.concat
 local blam = require "blam"
+objectClasses = blam.objectClasses
+tagClasses = blam.tagClasses
+objectNetworkRoleClasses = blam.objectNetworkRoleClasses
 local isNull = blam.isNull
 local color = require "ncolor"
 local getIndexById = blam.getIndexById
@@ -67,6 +70,7 @@ function core.updateObjectPacketNoParent(syncedIndex, object)
         encode("f", object.x),
         encode("f", object.y),
         encode("f", object.z),
+        getIndexById(object.animationTagId),
         object.animation,
         object.animationFrame,
         encode("f", yaw),
@@ -313,6 +317,10 @@ function core.unitPropertiesPacket(syncedIndex, unit)
         parentSeatIndex = nil
         parentObjectSyncedIndex = nil
     end
+    local nameIndex = unit.nameIndex
+    if isNull(nameIndex) then
+        nameIndex = nil
+    end
     local packet = concat({
         "@o",
         syncedIndex,
@@ -329,7 +337,8 @@ function core.unitPropertiesPacket(syncedIndex, unit)
         unit.isCamoActive and 1 or 0,
         parentObjectSyncedIndex or "",
         parentSeatIndex or "",
-        unit.team
+        unit.team,
+        nameIndex or ""
     }, packetSeparator)
     assert(#packet <= 64, "Packet size is too big")
     return packet
@@ -345,7 +354,7 @@ function core.bipedPropertiesPacket(syncedIndex, biped)
         core.getSyncedIndexByObjectId(biped.firstWeaponObjectId) or "",
         core.getSyncedIndexByObjectId(biped.secondWeaponObjectId) or "",
         biped.flashlight and 1 or 0,
-        biped.isApparentlyDead and 1 or 0,
+        biped.isApparentlyDead and 1 or 0
     }, packetSeparator)
     assert(#packet <= 64, "Packet size is too big")
     return packet
@@ -445,102 +454,6 @@ end
 ---@param name string
 function core.toSentenceCase(name)
     return string.gsub(" " .. name:gsub("_", " "), "%W%l", string.upper):sub(2)
-end
-
---- Process HSC code from the Harmony hook
----@param hscCommand string
----@return string?
-function core.adaptHSC(hscCommand)
-    -- Check if the map is trying to get a player on a vehicle
-    if starts(hscCommand, "sync_unit_enter_vehicle") and hscCommand:find("player") then
-        local params = core.parseHSC(hscCommand)
-        local unitName = params[2]
-        local begin, last = unitName:find("player")
-        local playerIndex = to_player_index(tonumber(unitName:sub(last + 1, last + 2), 10))
-        local objectName = params[3]
-        local seatIndex = tonumber(params[4], 10)
-        for vehicleObjectId, vehicleTagId in pairs(VehiclesList) do
-            local vehicle = blam.object(get_object(vehicleObjectId))
-            if vehicle and not isNull(vehicle.nameIndex) then
-                local scenario = blam.scenario(0)
-                local objectScenarioName = scenario.objectNames[vehicle.nameIndex + 1]
-                if objectName == objectScenarioName then
-                    if player_present(playerIndex) then
-                        console_debug("Player " .. playerIndex .. " will enter vehicle " ..
-                                          vehicleObjectId .. " on seat " .. seatIndex)
-                        enter_vehicle(vehicleObjectId, playerIndex, seatIndex)
-                    end
-                end
-            end
-        end
-        return
-    elseif starts(hscCommand, "sync_object_create ") or
-        starts(hscCommand, "sync_object_create_anew ") then
-        -- Only sync object creation if object is not a vehicle
-        local params = core.parseHSC(hscCommand)
-        local objectName = params[2]
-        for vehicleObjectId, vehicleTagId in pairs(VehiclesList) do
-            local vehicle = blam.object(get_object(vehicleObjectId))
-            if vehicle and not isNull(vehicle.nameIndex) then
-                local scenario = blam.scenario(0)
-                assert(scenario, "Failed to load scenario tag")
-                local objectScenarioName = scenario.objectNames[vehicle.nameIndex + 1]
-                if (objectName == objectScenarioName) then
-                    return
-                end
-            end
-        end
-    elseif (starts(hscCommand, "sync_object_teleport") and hscCommand:find("player")) then
-        -- Cancel player teleport on client to prevent desync
-        -- TODO Remove sync for this from the Mimic adapter, it will prevent crashes on client
-        return
-    elseif (starts(hscCommand, "sync_unit_suspended") and hscCommand:find("player")) then
-        local params = core.parseHSC(hscCommand)
-        local unitName = params[2]
-        local begin, last = unitName:find("player")
-        local playerIndex = to_player_index(tonumber(unitName:sub(last + 1, last + 2), 10))
-        local playerBiped = blam.biped(get_dynamic_player(playerIndex))
-        if (playerBiped and not isNull(playerBiped.vehicleObjectId)) then
-            say_all("Erasing player vehicle...")
-            delete_object(playerBiped.vehicleObjectId)
-        end
-        return
-    elseif (hscCommand:find("nav_point")) then
-        -- FIXME This is not working for some reason
-        for playerIndex = 0, 15 do
-            Broadcast(hscCommand:gsub("player0", "player" .. playerIndex))
-        end
-        return
-    else
-        for actionName, action in pairs(hsc) do
-            -- Check if command has parameters
-            if starts(hscCommand, "sync_" .. actionName .. " ") then
-                -- Escape spaces and quotes
-                console_debug("Raw command: " .. hscCommand)
-
-                local params = core.parseHSC(hscCommand)
-                params = shift(params, 1, -1)
-
-                -- Structure that holds command data
-                local syncPacketData = {action.packetType}
-
-                -- Transform parameters into blam terms, IDs, indexes, etc
-                for parameterIndex, parameter in pairs(action.parameters) do
-                    local argumentValue = params[parameterIndex]
-                    if argumentValue then
-                        if parameter.value and parameter.class then
-                            argumentValue = tostring(blam.getTag(argumentValue, parameter.class).id)
-                        end
-                        append(syncPacketData, argumentValue)
-                    end
-                end
-
-                local syncPacket = concat(syncPacketData, ",")
-                return syncPacket
-            end
-        end
-    end
-    return hscCommand
 end
 
 --- Get the synced network index of an object by object id
@@ -745,6 +658,49 @@ function core.disablePlayerCollision(enable)
                 if biped then
                     blam.bipedTag(biped.tagId).disableCollision = enable
                 end
+            end
+        end
+    end
+end
+
+local previouslyNetworkedObjects = {}
+
+--- Erase all non server controlled objects that were never networked
+---
+--- Prevents object duplication in cinematics and other scenarios
+---
+--- **NOTE**: Objects that were created by the server but never networked at some point will also be erased
+function core.eraseNotServerControlledObjects()
+    for objectIndex = 0, 2047 do
+        local object, objectHandle = blam.getObject(objectIndex)
+        if object and objectHandle then
+            local isBiped = object.class == objectClasses.biped
+            local isVehicle = object.class == objectClasses.vehicle
+            local isWeapon = object.class == objectClasses.weapon
+            local isLocal = object.networkRoleClass == objectNetworkRoleClasses.localOnly
+            local isNetworked = object.networkRoleClass == objectNetworkRoleClasses.puppet
+            local isSynchronizable = isBiped or isVehicle or isWeapon
+            local isNotPlayerOwned = isNull(object.playerId)
+            local previouslyNetworked = previouslyNetworkedObjects[objectHandle] ~= nil
+            if isSynchronizable then
+                if isNetworked then
+                    previouslyNetworkedObjects[objectHandle] = true
+                end
+                if isNotPlayerOwned and isLocal then
+                    if not previouslyNetworked then
+                        logger:debug(
+                            "Deleting local only object with handle {} and network class {}",
+                            objectHandle, object.class)
+                        delete_object(objectHandle)
+                    end
+                end
+            end
+        end
+        for objectHandle in pairs(previouslyNetworkedObjects) do
+            -- Just ask for object address to speed things up!
+            local object = get_object(objectHandle)
+            if not object then
+                previouslyNetworkedObjects[objectHandle] = nil
             end
         end
     end

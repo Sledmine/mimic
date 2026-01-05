@@ -1,5 +1,6 @@
 local luna = require "luna"
 local scriptVersion = require "mimic.version"
+local core = require "mimic.core"
 
 return {
     debug = {
@@ -33,6 +34,14 @@ return {
         help = "",
         execute = function()
             console_out("Mimic version " .. scriptVersion)
+        end
+    },
+    erase_local_objects = {
+        description = "Erase all locally created objects",
+        help = "",
+        execute = function()
+            core.eraseNotServerControlledObjects()
+            logger:info("Erased all locally created objects")
         end
     }
 }

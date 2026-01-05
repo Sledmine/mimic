@@ -3,19 +3,18 @@
 -- Sledmine (https://github.com/Sledmine)
 -- Client side synchronization feature for AI
 ------------------------------------------------------------------------------
-clua_version = 2.056
-
 local blam = require "blam"
+local script = require "script"
+local sleep = script.sleep
 objectClasses = blam.objectClasses
 tagClasses = blam.tagClasses
+objectNetworkRoleClasses = blam.objectNetworkRoleClasses
 local isNull = blam.isNull
 local core = require "mimic.core"
 package.preload["luna"] = nil
 package.loaded["luna"] = nil
 require "luna"
-local append = table.insert
 local color = require "ncolor"
-local concat = table.concat
 local memoize = require "memoize"
 local tonumber = memoize(tonumber)
 local balltze = Balltze
@@ -23,9 +22,13 @@ local engine = Engine
 
 -- Script settings variables
 DisablePlayerCollision = false
-local lastMapName
-local enableSync = false
-local gameStarted = false
+
+-- State
+local isMimicRunning = false
+local firstTickAlready = false
+local packetCount = 0
+local packetsPerSecond = 0
+local timeSinceLastPacket = 0
 
 -- Debug draw thing
 local nearestAIDetails = ""
@@ -33,46 +36,6 @@ local font = "small"
 local align = "center"
 local bounds = {left = 0, top = 400, right = 640, bottom = 480}
 local textColor = {1.0, 0.45, 0.72, 1.0}
-local packetCount = 0
-local packetsPerSecond = 0
-local timeSinceLastPacket = 0
-
--- State
-local queuePackets = {}
----@type aiData[]
-
-function dprint(message, ...)
-    if DebugMode then
-        local color = {1, 1, 1}
-        if (...) then
-            local debugMessage = string.format(message, ...)
-            if (debugMessage:find("Warning")) then
-                color = {1, 0.556, 0.101}
-            elseif (debugMessage:find("Error")) then
-                color = {1, 0, 0}
-            elseif (debugMessage:find("Success")) then
-                color = {0, 1, 0}
-            end
-            console_out(debugMessage, table.unpack(color))
-            return
-        end
-        if (message:find("Warning")) then
-            color = {1, 0.556, 0.101}
-        elseif (message:find("Error")) then
-            color = {1, 0, 0}
-        elseif (message:find("Success")) then
-            color = {0, 1, 0}
-        end
-        console_out(message, table.unpack(color))
-        return
-    end
-end
-
-function OnLoad()
-    logger:info("Loading main")
-    gameStarted = false
-    queuePackets = {}
-end
 
 ---@class aiData
 ---@field tagId number
@@ -86,14 +49,14 @@ end
 ---@param packetType string
 ---@param packet string[]
 local function processPacket(message, packetType, packet)
-    -- Enable synchronization only when the server sent a mimic packet
-    enableSync = true
-    -- local currentTime = os.time()
+    -- Enable synchronization only when the server sends the first packet
+    isMimicRunning = true
+    -- local time = os.time()
     if DebugMode then
         packetCount = packetCount + 1
         if DebugLevel >= 2 then
             if not packetType:startswith "@u" then
-                dprint("Received packet %s size %s message: %s", packetType, #message, message)
+                logger:debug("Received packet {} size {} message: {}", packetType, #message, message)
             end
         end
     end
@@ -194,11 +157,11 @@ local function processPacket(message, packetType, packet)
             local syncedIndex = tonumber(packet[2])
             assert(syncedIndex, "Error, synced index is not valid")
 
-            local objectId = blam.getObjectIdBySyncedIndex(syncedIndex)
-            if not objectId then
+            local objectHandleValue = blam.getObjectIdBySyncedIndex(syncedIndex)
+            if not objectHandleValue then
                 return
             end
-            local unit = blam.unit(get_object(objectId))
+            local unit = blam.unit(get_object(objectHandleValue))
             if not unit then
                 return
             end
@@ -207,9 +170,9 @@ local function processPacket(message, packetType, packet)
             local isVehicle = unit.class == objectClasses.vehicle
 
             if isBiped then
-                unit = blam.biped(get_object(objectId))
+                unit = blam.biped(get_object(objectHandleValue))
             elseif isVehicle then
-                unit = blam.vehicle(get_object(objectId))
+                unit = blam.vehicle(get_object(objectHandleValue))
             end
             if not unit then
                 return
@@ -230,6 +193,7 @@ local function processPacket(message, packetType, packet)
             local parentObjectSyncedIndex = tonumber(packet[12])
             local parentSeatIndex = tonumber(packet[13])
             local team = tonumber(packet[14])
+            local nameIndex = tonumber(packet[15])
 
             -- Sync region permutations
             for regionIndex, permutation in pairs(regions) do
@@ -252,6 +216,12 @@ local function processPacket(message, packetType, packet)
                 unit.team = team or blam.null
             end
 
+            -- Sync object name
+            if nameIndex then
+                unit.nameIndex = nameIndex
+                blam.objectNameHandle(nameIndex, objectHandleValue)
+            end
+
             -- Sync parent vehicle
             if isVehicle then
                 -- TODO Release new balltze to support exiting vehicles, as of today
@@ -267,7 +237,8 @@ local function processPacket(message, packetType, packet)
                 if parentObjectId then
                     logger:debug("Unit with sync index {} is entering vehicle with sync index {}",
                                  syncedIndex, parentObjectSyncedIndex)
-                    engine.gameState.unitEnterVehicle(objectId, parentObjectId, parentSeatIndex)
+                    engine.gameState.unitEnterVehicle(objectHandleValue, parentObjectId,
+                                                      parentSeatIndex)
                 end
             end
         elseif packetType == "@b" then
@@ -335,9 +306,10 @@ local function processPacket(message, packetType, packet)
             local hscCommand = core.parseHscPacket(message)
             assert(hscCommand, "Error, hsc command is not valid")
             if DebugMode then
-                -- if DebugLevel >= 2 then
                 logger:debug("Executing HSC command: {}", hscCommand)
-                -- end
+                if DebugLevel >= 2 then
+                    logger:debug("Received HSC packet: {}", message)
+                end
             end
             engine.hsc.executeScript(hscCommand)
             if hscCommand:includes("camera_set") then
@@ -352,24 +324,16 @@ local function processPacket(message, packetType, packet)
             end
         end
     end
-    -- dprint("Packet processed, elapsed time: %.6f\n", os.time() - time)
-end
-
-local function onGameStart()
-    gameStarted = true
+    -- logger:debug("Packet processed, elapsed time: {}", string.format("%.6f", os.time() - time))
 end
 
 function OnTick()
-    if not gameStarted then
-        onGameStart()
+    if not firstTickAlready then
+        firstTickAlready = true
     end
     core.disablePlayerCollision(DisablePlayerCollision)
     -- Start removing the server created bipeds only when the server aks for it
     if blam.isGameDedicated() then
-        if enableSync and gameStarted then
-            -- Constantly erase locally created AI bipeds
-            engine.hsc.executeScript("ai_erase_all")
-        end
         if DebugMode then
             if engine.gameState.getPlayer() then
                 local currentTime = os.time()
@@ -393,6 +357,16 @@ function OnTick()
         end
     end
 end
+
+-- Continuously erase local bipeds, vehicles and weapons not controlled by the server
+script.continuous(function()
+    if isMimicRunning and firstTickAlready then
+        -- Save CPU by sleeping a bit
+        sleep(30)
+        core.eraseNotServerControlledObjects()
+        -- engine.hsc.executeScript("ai_erase_all")
+    end
+end)
 
 --- OnPacket
 ---@param message string
@@ -478,11 +452,8 @@ local onFrame = balltze.event.frame.subscribe(function(event)
     end
 end)
 
-OnLoad()
-
 return {
     unload = function()
-        logger:warning("Unloading main")
         onTickEvent:remove()
         onRconMessageEvent:remove()
         onFrame:remove()
