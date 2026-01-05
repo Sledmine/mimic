@@ -66,7 +66,7 @@ end
 ---@param ticks number
 local function sleepThreadFor(ticks)
     if ticks == -1 then
-        logger:debug("Sleeping until woken up")
+        -- logger:debug("Sleeping until woken up")
     else
         -- logger:debug("Sleeping for " .. ticks .. " ticks")
     end
@@ -114,8 +114,10 @@ function script.sleep(...)
             callScriptThread.parent = scriptThread
             scriptThread.child = callScriptThread
             callScriptThread.isSleep = true
-            return
+            -- else
+            -- logger:warning("Tried to sleep a script that does not exist.")
         end
+        return
     end
 
     -- Normal case: create a child thread that sleeps based on args
@@ -202,10 +204,10 @@ local function handleScriptThread(scriptThread, result)
         else
             removeThreadFromTrace(scriptThread)
             if scriptThread.parent then
-                local result = pcall(handleScriptThread, scriptThread.parent, threadResult)
-                if not result then
-                    -- error(debug.traceback(scriptThread.parent.thread), 2)
-                    logger:error(debug.traceback(scriptThread.parent.thread))
+                local ok, result = pcall(handleScriptThread, scriptThread.parent, threadResult)
+                if not ok then
+                    -- error(debug.traceback(scriptThread.parent.thread, result), 2)
+                    logger:error(debug.traceback(scriptThread.parent.thread, result))
                 end
             end
         end
