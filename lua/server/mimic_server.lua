@@ -28,6 +28,7 @@ local core = require "mimic.core"
 local toSentenceCase = core.toSentenceCase
 local constants = require "mimic.constants"
 local version = require "mimic.version"
+local script = require "script"
 
 -- Settings
 DebugMode = false
@@ -231,9 +232,9 @@ function RegisterPlayerSync(playerIndex)
             say(playerIndex, "Your ping is too high, you may experience sync problems")
             interval = constants.maximumSyncInterval
         end
-        logger:debug("Player table address is {}", string.tohex(get_player(playerIndex)))
-        logger:debug("Player biped id is {}", string.tohex(player.objectId))
-        logger:debug("Player sync index is {}", string.tohex(player.index))
+        --logger:debug("Player table address is {}", string.tohex(get_player(playerIndex)))
+        --logger:debug("Player biped id is {}", string.tohex(player.objectId))
+        --logger:debug("Player sync index is {}", string.tohex(player.index))
         logger:debug("Player {} ping is {}ms", player.name, player.ping)
         logger:debug("SyncUpdate timer for player {} set to {}ms", playerIndex, interval)
         lastObjectStatePerPlayer[playerIndex] = {}
@@ -286,10 +287,10 @@ function ShowCurrentSyncedObjects(printTable)
                 local objectAddress = get_object(objectId)
                 local object = blam.object(objectAddress)
                 if object then
-                    local format = "[%s] - %s - Object ID: %s"
+                    local format = "[%s] - %s - Handle: %s"
                     console_out(format:format(i, blam.getTag(object.tagId).path, objectId))
                 else
-                    local format = "[%s] - %s - Object ID: %s"
+                    local format = "[%s] - %s - Handle: %s"
                     console_out(format:format(i, "NULL", objectId))
                 end
             end
@@ -318,6 +319,15 @@ function OnMapLoad()
         serverSideProjectiles(false)
     end
 end
+
+script.continuous(function ()
+    local memoryUsage = collectgarbage("count") / 1024
+    local memoryText = string.format("Mimic script memory usage: %.2f MB", memoryUsage)
+    logger:debug(memoryText)
+    script.sleep(blam.secondsToTicks(4))
+
+    ShowCurrentSyncedObjects()
+end)
 
 function OnTick()
     -- Check for BSP Changes
@@ -355,6 +365,7 @@ function OnTick()
     end
 
     if currentScenario then
+        script.poll()
         -- Check for device machine changes
         for objectId, group in pairs(deviceMachinesList) do
             local device = blam.deviceMachine(get_object(objectId))
