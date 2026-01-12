@@ -28,7 +28,7 @@ local isMimicRunning = false
 local firstTickAlready = false
 local packetCount = 0
 local packetsPerSecond = 0
-local timeSinceLastPacket = 0
+local timeSinceLastPacket = os.clock()
 
 -- Debug draw thing
 local nearestAIDetails = ""
@@ -336,11 +336,12 @@ function OnTick()
     if blam.isGameDedicated() then
         if DebugMode then
             if engine.gameState.getPlayer() then
-                local currentTime = os.time()
-                if (currentTime - timeSinceLastPacket) >= 1 then
-                    timeSinceLastPacket = currentTime
-                    packetsPerSecond = packetCount
+                local currentTime = os.clock()
+                local elapsed = currentTime - timeSinceLastPacket
+                if elapsed >= 1.0 then
+                    packetsPerSecond = math.floor(packetCount / elapsed)
                     packetCount = 0
+                    timeSinceLastPacket = currentTime
                 end
                 nearestAIDetails = ""
                 for syncedIndex, objectId in pairs(core.getSyncedBipedIds()) do
