@@ -15,6 +15,9 @@ local sqrt = math.sqrt
 local fmod = math.fmod
 local rad = math.rad
 local deg = math.deg
+local round = math.round or function(num)
+    return math.floor(num + 0.5)
+end
 
 local blam = {_VERSION = "1.16.0"}
 
@@ -3588,6 +3591,18 @@ function blam.objectNameHandle(objectName, handle)
         -- Get the object handle from the global object name list
         return read_dword(objectNameListAddress + (nameIndex * 4))
     end
+end
+
+--- Converts ticks to seconds (30 ticks per second)
+---@param ticks number
+function blam.ticksToSeconds(ticks)
+    return round(ticks / 30)
+end
+
+--- Converts seconds to ticks (30 ticks per second)
+--- @param seconds number
+function blam.secondsToTicks(seconds)
+    return 30 * seconds
 end
 
 return blam
