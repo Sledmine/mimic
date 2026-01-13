@@ -29,6 +29,8 @@ local toSentenceCase = core.toSentenceCase
 local constants = require "mimic.constants"
 local version = require "mimic.version"
 local script = require "script"
+local sleep = script.sleep
+local await = script.call
 
 -- Settings
 DebugMode = false
@@ -66,6 +68,7 @@ local function broadcastMessage(message)
 end
 
 function monocastMessage(playerIndex, message)
+    --logger:debug("Sending to player {}: {}", playerIndex, message)
     rprint(playerIndex, message)
     return false
 end
@@ -114,6 +117,7 @@ end
 ---@param serverObjectId number
 ---@param syncedIndex number
 local function updateNetworkObject(playerIndex, unit, serverObjectId, syncedIndex)
+    local packetQueue = {}
     local player = blam.biped(get_dynamic_player(playerIndex))
     if not player then
         return
@@ -134,7 +138,8 @@ local function updateNetworkObject(playerIndex, unit, serverObjectId, syncedInde
                                        constants.syncDistance)) then
             local updatePacket = core.updateObjectPacket(syncedIndex, unit)
             if updatePacket and syncedIndex then
-                monocastMessage(playerIndex, updatePacket)
+                --monocastMessage(playerIndex, updatePacket)
+                table.insert(packetQueue, updatePacket)
             end
         end
     else
@@ -142,11 +147,12 @@ local function updateNetworkObject(playerIndex, unit, serverObjectId, syncedInde
         if vehicle and core.objectIsNearTo(vehicle, unit, constants.syncDistance) then
             local updatePacket = core.updateObjectPacket(syncedIndex, unit)
             if updatePacket and syncedIndex then
-                monocastMessage(playerIndex, updatePacket)
+                --monocastMessage(playerIndex, updatePacket)
+                table.insert(packetQueue, updatePacket)
             end
         end
     end
-
+    return packetQueue
 end
 
 ---Syncs game data required just when the game starts
@@ -164,6 +170,8 @@ local lastObjectStatePerPlayer = {}
 
 ---Syncs game data required constantly during the game
 function SyncUpdate(playerIndex)
+    local lastStatePerPlayer = lastObjectStatePerPlayer[playerIndex] or {}
+    local packetQueue = {}
     for syncedIndex = 0, blam.getMaximumNetworkObjects() do
         local objectId = blam.getObjectIdBySyncedIndex(syncedIndex)
         if objectId then
@@ -173,20 +181,23 @@ function SyncUpdate(playerIndex)
                 local unit = blam.unit(object.address)
                 assert(unit, "Unit cast failed")
 
-                local lastObjectState = lastObjectStatePerPlayer[playerIndex][syncedIndex] or {}
+                local lastObjectState = lastStatePerPlayer[syncedIndex] or {}
                 if object.shaderPermutationIndex ~= lastObjectState.shaderPermutationIndex then
-                    monocastMessage(playerIndex, core.objectColorPacket(syncedIndex, object))
+                    --monocastMessage(playerIndex, core.objectColorPacket(syncedIndex, object))
+                    --table.insert(packetQueue, core.objectColorPacket(syncedIndex, object))
                 end
 
                 if core.unitPropertiesShouldBeSynced(unit, lastObjectState) then
                     lastObjectState = blam.dumpObject(unit)
-                    lastObjectStatePerPlayer[playerIndex][syncedIndex] = lastObjectState
-                    monocastMessage(playerIndex, core.unitPropertiesPacket(syncedIndex, unit))
+                    lastStatePerPlayer[syncedIndex] = lastObjectState
+                    --monocastMessage(playerIndex, core.unitPropertiesPacket(syncedIndex, unit))
+                    --table.insert(packetQueue, core.unitPropertiesPacket(syncedIndex, unit))
 
                     if object.class == objectClasses.biped then
                         local biped = blam.biped(object.address)
                         assert(biped, "Biped cast failed")
-                        monocastMessage(playerIndex, core.bipedPropertiesPacket(syncedIndex, biped))
+                        --monocastMessage(playerIndex, core.bipedPropertiesPacket(syncedIndex, biped))
+                        --table.insert(packetQueue, core.bipedPropertiesPacket(syncedIndex, biped))
                     end
                 end
             end
@@ -206,60 +217,39 @@ function SyncUpdate(playerIndex)
                     assert(unit, "Unit cast failed")
                     local syncedIndex = core.getSyncedIndexByObjectId(objectId)
                     if isUnit and syncedIndex and core.isObjectSynceable(object, objectId) then
-                        updateNetworkObject(playerIndex, unit, objectId, syncedIndex)
+                        local packets = updateNetworkObject(playerIndex, unit, objectId, syncedIndex)
+                        for _, packet in pairs(packets) do
+                            table.insert(packetQueue, packet)
+                        end
                     end
                 end
             end
+        end
+        logger:debug("Player {} sync packets to send: {}", playerIndex, #packetQueue)
+
+        for _, packet in pairs(packetQueue) do
+            monocastMessage(playerIndex, packet)
         end
         return true
     end
     return false
 end
 
-function RegisterPlayerSync(playerIndex)
-    -- Register global function to sync data to new player
-    _G["SyncUpdate" .. playerIndex] = function()
-        return SyncUpdate(playerIndex)
-    end
-    local player = blam.player(get_player(playerIndex))
-    if player then
-        -- Add 33ms interval (like a tick ahead of server) to avoid sync problems
-        local interval = player.ping + 15
-        if player.ping < constants.syncEveryMillisecs then
-            interval = constants.syncEveryMillisecs + 15
-        end
-        if player.ping > constants.maximumSyncInterval then
-            say(playerIndex, "Your ping is too high, you may experience sync problems")
-            interval = constants.maximumSyncInterval
-        end
-        --logger:debug("Player table address is {}", string.tohex(get_player(playerIndex)))
-        --logger:debug("Player biped id is {}", string.tohex(player.objectId))
-        --logger:debug("Player sync index is {}", string.tohex(player.index))
-        logger:debug("Player {} ping is {}ms", player.name, player.ping)
-        logger:debug("SyncUpdate timer for player {} set to {}ms", playerIndex, interval)
-        lastObjectStatePerPlayer[playerIndex] = {}
-        set_timer(interval, "SyncUpdate" .. playerIndex)
-    end
-    return false
-end
-
 function OnPlayerJoin(playerIndex)
     -- Sync game data just required when the game starts
-    set_timer(constants.startSyncingAfterMillisecs, "SyncGameCoreState", playerIndex)
+    script.create(function()
+        sleep(blam.secondsToTicks(constants.startSyncingAfterMillisecs / 1000))
+        SyncGameCoreState(playerIndex)
+    end)
 
     -- Sync game state
-    set_timer(constants.startSyncingAfterMillisecs, "SyncGameState", playerIndex)
-
-    -- Setup player sync update
-    set_timer(constants.startSyncingAfterMillisecs, "RegisterPlayerSync", playerIndex)
+    script.create(function()
+        sleep(blam.secondsToTicks(constants.startSyncingAfterMillisecs / 1000))
+        SyncGameState(playerIndex)
+    end)
 end
 
 function OnPlayerLeave(playerIndex)
-    -- Remove player from sync update
-    _G["SyncUpdate" .. playerIndex] = function()
-        logger:debug("Removing SyncUpdate timer for player {}", playerIndex)
-        return false
-    end
 end
 
 function OnPlayerDead(deadPlayerIndex)
@@ -320,7 +310,7 @@ function OnMapLoad()
     end
 end
 
-script.continuous(function ()
+script.continuous(function()
     local memoryUsage = collectgarbage("count") / 1024
     local memoryText = string.format("Mimic script memory usage: %.2f MB", memoryUsage)
     logger:debug(memoryText)
@@ -439,6 +429,8 @@ function OnCommand(playerIndex, command, environment, rconPassword)
     end
 end
 
+local threads = {}
+
 function OnScriptLoad()
     core.patchPlayerConnectionTimeout()
     rconPasswordAddress = read_dword(sig_scan("7740BA??????008D9B000000008A01") + 0x3)
@@ -458,6 +450,35 @@ function OnScriptLoad()
         end
     else
         cprint("Error, at obtaining rcon patches, please check SAPP version.")
+    end
+
+    for playerIndex = 1, 16 do
+        threads[playerIndex] = function()
+            if player_present(playerIndex) then
+                sleep(function ()
+                    return get_dynamic_player(playerIndex) ~= 0
+                end)
+                local player = blam.player(get_player(playerIndex))
+                if player then
+                    await(SyncUpdate, playerIndex)
+                    local networkDelayMs = player.ping
+                    if networkDelayMs <= 0 then
+                        networkDelayMs = constants.minimumSyncInterval
+                    end
+                    --local ticks = blam.millisecondsToTicks(networkDelayMs)
+                    --if ticks <= 0 then
+                    --    ticks = blam.millisecondsToTicks(constants.minimumSyncInterval)
+                    --end
+                    local ticks = 3
+                    logger:debug("Player {} ping is {} ms, sleeping {} ticks", playerIndex, networkDelayMs, ticks)
+                    sleep(ticks)
+                end
+            end
+        end
+    end
+
+    for k, thread in pairs(threads) do
+        script.continuous(thread)
     end
 
     -- Set server callback

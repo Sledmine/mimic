@@ -3605,4 +3605,11 @@ function blam.secondsToTicks(seconds)
     return 30 * seconds
 end
 
+--- Converts milliseconds to ticks
+---@param milliseconds number
+---@return number
+function blam.millisecondsToTicks(milliseconds)
+    return round((milliseconds / 1000) * 30)
+end
+
 return blam
