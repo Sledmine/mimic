@@ -168,25 +168,49 @@ function SyncUpdate(playerIndex)
         local objectId = blam.getObjectIdBySyncedIndex(syncedIndex)
         if objectId then
             local object = blam.getObject(objectId)
-            if object and
-                (object.class == objectClasses.biped or object.class == objectClasses.vehicle) then
-                local unit = blam.unit(object.address)
-                assert(unit, "Unit cast failed")
+            if object then
+                local isSynchronizable = object.class == objectClasses.biped or object.class ==
+                                             objectClasses.vehicle or object.class ==
+                                             objectClasses.equipment or object.class ==
+                                             objectClasses.weapon
+                if isSynchronizable then
+                    local isUnit = object.class == objectClasses.biped or object.class ==
+                                       objectClasses.vehicle
+                    local isItem = object.class == objectClasses.equipment or object.class ==
+                                       objectClasses.weapon
+                    local lastObjectState = lastObjectStatePerPlayer[playerIndex][syncedIndex] or {}
+                    if isUnit then
+                        local unit = blam.unit(object.address)
+                        assert(unit, "Unit cast failed")
 
-                local lastObjectState = lastObjectStatePerPlayer[playerIndex][syncedIndex] or {}
-                if object.shaderPermutationIndex ~= lastObjectState.shaderPermutationIndex then
-                    monocastMessage(playerIndex, core.objectColorPacket(syncedIndex, object))
-                end
+                        if object.shaderPermutationIndex ~= lastObjectState.shaderPermutationIndex then
+                            monocastMessage(playerIndex, core.objectColorPacket(syncedIndex, object))
+                        end
 
-                if core.unitPropertiesShouldBeSynced(unit, lastObjectState) then
-                    lastObjectState = blam.dumpObject(unit)
-                    lastObjectStatePerPlayer[playerIndex][syncedIndex] = lastObjectState
-                    monocastMessage(playerIndex, core.unitPropertiesPacket(syncedIndex, unit))
+                        if core.unitPropertiesShouldBeSynced(unit, lastObjectState) then
+                            lastObjectState = blam.dumpObject(unit)
+                            lastObjectStatePerPlayer[playerIndex][syncedIndex] = lastObjectState
+                            monocastMessage(playerIndex,
+                                            core.unitPropertiesPacket(syncedIndex, unit))
 
-                    if object.class == objectClasses.biped then
-                        local biped = blam.biped(object.address)
-                        assert(biped, "Biped cast failed")
-                        monocastMessage(playerIndex, core.bipedPropertiesPacket(syncedIndex, biped))
+                            if object.class == objectClasses.biped then
+                                local biped = blam.biped(object.address)
+                                assert(biped, "Biped cast failed")
+                                monocastMessage(playerIndex,
+                                                core.bipedPropertiesPacket(syncedIndex, biped))
+                            end
+                        end
+                    end
+                    if isItem then
+                        local item = blam.item(object.address)
+                        assert(item, "Item cast failed")
+
+                        if not isNull(item.nameIndex) and item.nameIndex ~=
+                            lastObjectState.nameIndex then
+                            lastObjectState.nameIndex = item.nameIndex
+                            lastObjectStatePerPlayer[playerIndex][syncedIndex] = lastObjectState
+                            monocastMessage(playerIndex, core.updateItemPacket(syncedIndex, item))
+                        end
                     end
                 end
             end
@@ -232,9 +256,9 @@ function RegisterPlayerSync(playerIndex)
             say(playerIndex, "Your ping is too high, you may experience sync problems")
             interval = constants.maximumSyncInterval
         end
-        --logger:debug("Player table address is {}", string.tohex(get_player(playerIndex)))
-        --logger:debug("Player biped id is {}", string.tohex(player.objectId))
-        --logger:debug("Player sync index is {}", string.tohex(player.index))
+        -- logger:debug("Player table address is {}", string.tohex(get_player(playerIndex)))
+        -- logger:debug("Player biped id is {}", string.tohex(player.objectId))
+        -- logger:debug("Player sync index is {}", string.tohex(player.index))
         logger:debug("Player {} ping is {}ms", player.name, player.ping)
         logger:debug("SyncUpdate timer for player {} set to {}ms", playerIndex, interval)
         lastObjectStatePerPlayer[playerIndex] = {}
@@ -320,7 +344,7 @@ function OnMapLoad()
     end
 end
 
-script.continuous(function ()
+script.continuous(function()
     local memoryUsage = collectgarbage("count") / 1024
     local memoryText = string.format("Mimic script memory usage: %.2f MB", memoryUsage)
     logger:debug(memoryText)

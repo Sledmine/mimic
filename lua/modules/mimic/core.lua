@@ -109,6 +109,24 @@ function core.updateObjectPacket(syncedIndex, object)
     return concat(packet, packetSeparator)
 end
 
+---Create a packet for syncing item objects
+---@param syncedIndex number
+---@param item item
+---@return string? itemPacket
+function core.updateItemPacket(syncedIndex, item)
+    local nameIndex = item.nameIndex
+    if isNull(nameIndex) then
+        nameIndex = nil
+    end
+    local packet = concat({
+        packetPrefix .. "i",
+        syncedIndex,
+        nameIndex or ""
+    }, packetSeparator)
+    assert(#packet <= 64, "Packet size is too big")
+    return packet
+end
+
 local snakeCaseTagClasses = {
     actor_variant = "actv",
     actor = "actr",

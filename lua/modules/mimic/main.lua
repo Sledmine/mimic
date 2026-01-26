@@ -301,7 +301,24 @@ local function processPacket(message, packetType, packet)
                     end
                 end
             end
+        elseif packetType == "@i" then
+            local syncedIndex = tonumber(packet[2])
+            assert(syncedIndex, "Error, synced index is not valid")
+            local nameIndex = tonumber(packet[3])
 
+            local objectHandle = blam.getObjectIdBySyncedIndex(syncedIndex)
+            if not objectHandle then
+                return
+            end
+            local item = blam.item(get_object(objectHandle))
+            if not item then
+                return
+            end
+
+            if nameIndex then
+                item.nameIndex = nameIndex
+                blam.objectNameHandle(nameIndex, objectHandle)
+            end
         else
             local hscCommand = core.parseHscPacket(message)
             assert(hscCommand, "Error, hsc command is not valid")
@@ -336,7 +353,7 @@ function OnTick()
     if blam.isGameDedicated() then
         if DebugMode then
             if engine.gameState.getPlayer() then
-                local currentTime = os.clock()
+                local currentTime = os.time()
                 local elapsed = currentTime - timeSinceLastPacket
                 if elapsed >= 1.0 then
                     packetsPerSecond = math.floor(packetCount / elapsed)
