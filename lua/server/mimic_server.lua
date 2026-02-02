@@ -6,19 +6,20 @@
 -- Declare api version before importing lua-blam
 api_version = "1.12.0.0"
 
--- Bring compatibility with Lua 5.3
-require "compat53"
-print("Compatibility with Lua 5.3 has been loaded!")
-local blam = require "blam"
-console_out = cprint
-
--- Bring compatibility with Balltze
-require "balltzeCompat"
-
 -- Lua modules
-local luna = require "luna"
+require "luna"
 local split = string.split
 local startswith = string.startswith
+
+-- Bring compatibility modules (Lua 5.3 and Balltze API)
+require "compat53"
+require "balltzeCompat"
+
+-- Pre require structures for blam2
+require "structures.biped"
+
+local blam = require "blam"
+console_out = cprint
 
 -- Halo Custom Edition modules
 local isNull = blam.isNull
@@ -29,6 +30,7 @@ local toSentenceCase = core.toSentenceCase
 local constants = require "mimic.constants"
 local version = require "mimic.version"
 local script = require "script"
+local sleep = script.sleep
 
 -- Settings
 DebugMode = false
@@ -36,7 +38,8 @@ local bspIndexAddress = 0x40002CD8
 local rconPasswordAddress
 local failMessageAddress
 local allowClientSideWeaponProjectilesAddress
-local rconPassword
+local serverRconPassword
+local enableSyncUpdate = true
 
 -- State
 local deviceMachinesList = {}
@@ -48,7 +51,7 @@ logger = Balltze.logger.createLogger("Mimic Server")
 
 ---Enable or disable server side projectiles synchronization
 ---@param enable boolean
-local function serverSideProjectiles(enable)
+local function setServerSideProjectiles(enable)
     -- TODO Move this function to core module
     if not allowClientSideWeaponProjectilesAddress then
         logger:error("Error no address found for client side weapon projectiles")
@@ -146,7 +149,43 @@ local function updateNetworkObject(playerIndex, unit, serverObjectId, syncedInde
             end
         end
     end
+end
 
+--- Sync network object to player
+---@param playerIndex number
+---@param unit unit
+---@param serverObjectId number
+---@param syncedIndex number
+local function updateNetworkObjectNoLook(playerIndex, unit, serverObjectId, syncedIndex)
+    local player = blam.biped(get_dynamic_player(playerIndex))
+    if not player then
+        return
+    end
+    -- Prevents AI from running out of ammo
+    -- local aiWeapon = blam.weapon(get_object(ai.firstWeaponObjectId))
+    -- if aiWeapon then
+    --    -- TODO We should not use this
+    --    aiWeapon.totalAmmo = 999
+    -- end
+    -- Sync AI biped if it is near to the player
+    local cinematicGlobals = blam.cinematicGlobals()
+    if isNull(player.vehicleObjectId) then
+        if cinematicGlobals.isInProgress or
+            (core.objectIsNearTo(player, unit, constants.syncDistance)) then
+            local updatePacket = core.updateObjectPacket(syncedIndex, unit)
+            if updatePacket and syncedIndex then
+                monocastMessage(playerIndex, updatePacket)
+            end
+        end
+    else
+        local vehicle = blam.object(get_object(player.vehicleObjectId))
+        if vehicle and core.objectIsNearTo(vehicle, unit, constants.syncDistance) then
+            local updatePacket = core.updateObjectPacket(syncedIndex, unit)
+            if updatePacket and syncedIndex then
+                monocastMessage(playerIndex, updatePacket)
+            end
+        end
+    end
 end
 
 ---Syncs game data required just when the game starts
@@ -162,22 +201,21 @@ end
 
 local lastObjectStatePerPlayer = {}
 
----Syncs game data required constantly during the game
+---Syncs game data required constantly during the game like object properties and state
+---@param playerIndex number
+---@return boolean repeat
 function SyncUpdate(playerIndex)
     for syncedIndex = 0, blam.getMaximumNetworkObjects() do
-        local objectId = blam.getObjectIdBySyncedIndex(syncedIndex)
-        if objectId then
-            local object = blam.getObject(objectId)
+        local objectHandle = blam.getObjectIdBySyncedIndex(syncedIndex)
+        if objectHandle then
+            local object = blam.getObject(objectHandle)
             if object then
-                local isSynchronizable = object.class == objectClasses.biped or object.class ==
-                                             objectClasses.vehicle or object.class ==
-                                             objectClasses.equipment or object.class ==
-                                             objectClasses.weapon
+                local isUnit = object.class == objectClasses.biped or object.class ==
+                                   objectClasses.vehicle
+                local isItem = object.class == objectClasses.equipment or object.class ==
+                                   objectClasses.weapon
+                local isSynchronizable = isUnit or isItem
                 if isSynchronizable then
-                    local isUnit = object.class == objectClasses.biped or object.class ==
-                                       objectClasses.vehicle
-                    local isItem = object.class == objectClasses.equipment or object.class ==
-                                       objectClasses.weapon
                     local lastObjectState = lastObjectStatePerPlayer[playerIndex][syncedIndex] or {}
                     if isUnit then
                         local unit = blam.unit(object.address)
@@ -218,19 +256,19 @@ function SyncUpdate(playerIndex)
     end
 
     if player_present(playerIndex) then
-        -- for _, objectId in pairs(core.getSyncedBipedIds()) do
         for syncedIndex = 0, blam.getMaximumNetworkObjects() do
-            local objectId = blam.getObjectIdBySyncedIndex(syncedIndex)
-            if objectId then
-                local object = blam.object(get_object(objectId))
+            local objectHandle = blam.getObjectIdBySyncedIndex(syncedIndex)
+            if objectHandle then
+                local object = blam.object(get_object(objectHandle))
                 if object then
                     local isUnit = object.class == objectClasses.biped or object.class ==
                                        objectClasses.vehicle
                     local unit = blam.unit(object.address)
                     assert(unit, "Unit cast failed")
-                    local syncedIndex = core.getSyncedIndexByObjectId(objectId)
-                    if isUnit and syncedIndex and core.isObjectSynceable(object, objectId) then
-                        updateNetworkObject(playerIndex, unit, objectId, syncedIndex)
+                    local syncedIndex = core.getSyncedIndexByObjectId(objectHandle)
+                    if isUnit and syncedIndex and core.isObjectSynceable(object, objectHandle) then
+                        --updateNetworkObjectNoLook(playerIndex, unit, objectHandle, syncedIndex)
+                        updateNetworkObject(playerIndex, unit, objectHandle, syncedIndex)
                     end
                 end
             end
@@ -242,15 +280,20 @@ end
 
 function RegisterPlayerSync(playerIndex)
     -- Register global function to sync data to new player
-    _G["SyncUpdate" .. playerIndex] = function()
+    local syncUpdateFuncName = "SyncUpdate" .. playerIndex
+    _G[syncUpdateFuncName] = function()
+        -- logger:debug("Executing SyncUpdate for player {}", playerIndex)
+        if not enableSyncUpdate then
+            return true
+        end
         return SyncUpdate(playerIndex)
     end
     local player = blam.player(get_player(playerIndex))
     if player then
         -- Add 33ms interval (like a tick ahead of server) to avoid sync problems
-        local interval = player.ping + 15
+        local interval = player.ping + 16
         if player.ping < constants.syncEveryMillisecs then
-            interval = constants.syncEveryMillisecs + 15
+            interval = constants.syncEveryMillisecs + 16
         end
         if player.ping > constants.maximumSyncInterval then
             say(playerIndex, "Your ping is too high, you may experience sync problems")
@@ -262,10 +305,29 @@ function RegisterPlayerSync(playerIndex)
         logger:debug("Player {} ping is {}ms", player.name, player.ping)
         logger:debug("SyncUpdate timer for player {} set to {}ms", playerIndex, interval)
         lastObjectStatePerPlayer[playerIndex] = {}
-        set_timer(interval, "SyncUpdate" .. playerIndex)
+        set_timer(interval, syncUpdateFuncName)
     end
     return false
 end
+
+-- This causes crashes because coroutines can not yield inside a timer function nor an event (?)
+--script.continuous(function()
+--    -- sleep(blam.secondsToTicks(constants.startSyncingAfterMillisecs / 1000))
+--    sleep(blam.secondsToTicks(1))
+--    for playerIndex = 1, 16 do
+--        script.continuous(function()
+--            sleep(function()
+--                return player_present(playerIndex)
+--            end)
+--            if _G["SyncUpdate" .. playerIndex] then
+--                return
+--            end
+--            logger:warning("Registering SyncUpdate timer for player {}", playerIndex)
+--            -- Setup player sync update
+--            set_timer(constants.startSyncingAfterMillisecs, "RegisterPlayerSync", playerIndex)
+--        end)
+--    end
+--end)
 
 function OnPlayerJoin(playerIndex)
     -- Sync game data just required when the game starts
@@ -274,14 +336,15 @@ function OnPlayerJoin(playerIndex)
     -- Sync game state
     set_timer(constants.startSyncingAfterMillisecs, "SyncGameState", playerIndex)
 
-    -- Setup player sync update
     set_timer(constants.startSyncingAfterMillisecs, "RegisterPlayerSync", playerIndex)
 end
 
 function OnPlayerLeave(playerIndex)
     -- Remove player from sync update
-    _G["SyncUpdate" .. playerIndex] = function()
+    local syncUpdateFuncName = "SyncUpdate" .. playerIndex
+    _G[syncUpdateFuncName] = function()
         logger:debug("Removing SyncUpdate timer for player {}", playerIndex)
+        --_G[syncUpdateFuncName] = nil
         return false
     end
 end
@@ -300,13 +363,13 @@ function OnGameEnd()
     resetState()
 end
 
-function ShowCurrentSyncedObjects(printTable)
-    console_out("---------------------- SYNCED OBJECTS ----------------------")
-    local syncedObjectsCount = 0
-    for i = 0, 509 do
+local function printNetworkObjects(printTable)
+    console_out("---------------------- NETWORK OBJECTS ----------------------")
+    local networkObjectsCount = 0
+    for i = 0, blam.getMaximumNetworkObjects() do
         local objectId = blam.getObjectIdBySyncedIndex(i)
         if objectId then
-            syncedObjectsCount = syncedObjectsCount + 1
+            networkObjectsCount = networkObjectsCount + 1
             if printTable then
                 local objectAddress = get_object(objectId)
                 local object = blam.object(objectAddress)
@@ -320,37 +383,40 @@ function ShowCurrentSyncedObjects(printTable)
             end
         end
     end
-    if syncedObjectsCount > 500 then
-        logger:warning("There are more than 500 synced objects, this will cause sync issues")
-        say_all("There are more than 500 synced objects, this will cause sync issues")
+    if networkObjectsCount > 500 then
+        logger:warning("There are more than 500 networked objects, this will cause stability issues")
+        say_all("There are more than 500 networked objects, this will cause stability issues")
     end
-    logger:info("Total synced objects: {}", syncedObjectsCount)
-    logger:info("Total synced bipeds: {}", #core.getSyncedBipedIds())
+    logger:info("Total network objects: {}", networkObjectsCount)
+    logger:info("Total network bipeds: {}", #core.getNetworkBipeds())
     return true
 end
 
 function OnMapLoad()
-    if DebugMode then
-        set_timer(5000, "ShowCurrentSyncedObjects")
-    end
     logger:info("Mimic version: {}", version)
     currentScenario = blam.scenario(0)
     assert(currentScenario, "No current scenario tag found")
     if currentScenario.encounterPaletteCount > 0 then
         logger:warning("Scenario has AI encounters, enabling projectiles sync")
-        serverSideProjectiles(true)
+        setServerSideProjectiles(true)
     else
-        serverSideProjectiles(false)
+        setServerSideProjectiles(false)
     end
+    -- Disable feign death chance to prevent buggy behavior with AI synchronization
+    core.disableBipedsFeignDeathChance()
 end
 
 script.continuous(function()
-    local memoryUsage = collectgarbage("count") / 1024
-    local memoryText = string.format("Mimic script memory usage: %.2f MB", memoryUsage)
-    logger:debug(memoryText)
-    script.sleep(blam.secondsToTicks(4))
-
-    ShowCurrentSyncedObjects()
+    if DebugMode then
+        local memoryUsage = collectgarbage("count") / 1024
+        local memoryText = string.format("Mimic script memory usage: %.2f MB", memoryUsage)
+        logger:debug(memoryText)
+        printNetworkObjects()
+        script.sleep(blam.secondsToTicks(4))
+    end
+    -- Not sure if we will leave this here, Coop Evolved implemented this instead
+    --script.sleep(blam.secondsToTicks(1))
+    --core.dynamicallyControlNetworkItems()
 end)
 
 function OnTick()
@@ -423,11 +489,14 @@ function OnTick()
     end
 end
 
+local RCON_ENVIRONMENT = 1
+local ADMIN_LEVEL = 4
+
 function OnCommand(playerIndex, command, environment, rconPassword)
     local playerAdminLevel = tonumber(get_var(playerIndex, "$lvl"))
-    if environment == 1 then
-        if playerAdminLevel == 4 then
-            if startswith(command, "mdis") then
+    if environment == RCON_ENVIRONMENT then
+        if playerAdminLevel == ADMIN_LEVEL or rconPassword == serverRconPassword then
+            if startswith(command, "mimic_distance") then
                 local data = split(command:replace("\"", ""), " ")
                 local newRadius = tonumber(data[2])
                 if newRadius then
@@ -435,7 +504,12 @@ function OnCommand(playerIndex, command, environment, rconPassword)
                 end
                 say_all("Mimic synchronization radius: " .. constants.syncDistance)
                 return false
-            elseif startswith(command, "mrate") then
+            elseif startswith(command, "mimic_toggle") then
+                enableSyncUpdate = not enableSyncUpdate
+                local status = toSentenceCase(tostring(enableSyncUpdate))
+                say_all("Mimic synchronization update is now: " .. status)
+                return false
+            elseif startswith(command, "mimic_sync_rate") then
                 local data = split(command:gsub("\"", ""), " ")
                 local newRate = tonumber(data[2])
                 if newRate then
@@ -443,9 +517,6 @@ function OnCommand(playerIndex, command, environment, rconPassword)
                 end
                 say_all("Mimic synchronization rate: " .. constants.syncEveryMillisecs)
                 return false
-                -- elseif command:startswith "network_objects" then
-                --    ShowCurrentSyncedObjects(true)
-                --    return false
             elseif startswith(command, "mbullshit") then
                 local data = split(command:gsub("\"", ""), " ")
                 local serverId = tonumber(data[2]) --[[@as number]]
@@ -474,14 +545,14 @@ function OnScriptLoad()
         write_byte(failMessageAddress, 0x0)
         safe_write(false)
         -- Read current rcon in the server
-        rconPassword = read_string(rconPasswordAddress)
-        if rconPassword then
-            cprint("Server rcon password is: \"" .. rconPassword .. "\"")
+        serverRconPassword = read_string(rconPasswordAddress)
+        if serverRconPassword then
+            -- logger:debug("Server rcon password is: \"" .. serverRconPassword .. "\"")
         else
-            cprint("Error, at getting server rcon, please set and enable rcon on the server.")
+            logger:error("Error, at getting server rcon, please set and enable rcon on the server.")
         end
     else
-        cprint("Error, at obtaining rcon patches, please check SAPP version.")
+        logger:error("Error, at obtaining rcon patches, please check SAPP version.")
     end
 
     -- Set server callback

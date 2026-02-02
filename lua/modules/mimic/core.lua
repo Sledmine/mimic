@@ -1,15 +1,9 @@
-local glue = require "glue"
+local inspect = require "inspect"
 local luna = require "luna"
 local hscDoc = require "hscDoc"
-local inspect = require "inspect"
 local split = luna.string.split
-local tohex = glue.string.tohex
-local fromhex = glue.string.fromhex
-local append = glue.append
-local shift = glue.shift
-local trim = glue.string.trim
-local escape = glue.string.esc
-local starts = luna.string.startswith
+local tohex = luna.string.tohex
+local fromhex = luna.string.fromhex
 local sqrt = math.sqrt
 local abs = math.abs
 local floor = math.floor
@@ -24,6 +18,7 @@ local isNull = blam.isNull
 local color = require "ncolor"
 local getIndexById = blam.getIndexById
 local engine = Engine
+local blam2 = require "blam2"
 
 local core = {}
 local packetPrefix = "@"
@@ -118,11 +113,7 @@ function core.updateItemPacket(syncedIndex, item)
     if isNull(nameIndex) then
         nameIndex = nil
     end
-    local packet = concat({
-        packetPrefix .. "i",
-        syncedIndex,
-        nameIndex or ""
-    }, packetSeparator)
+    local packet = concat({packetPrefix .. "i", syncedIndex, nameIndex or ""}, packetSeparator)
     assert(#packet <= 64, "Packet size is too big")
     return packet
 end
@@ -378,15 +369,46 @@ function core.bipedPropertiesPacket(syncedIndex, biped)
     return packet
 end
 
---- Check if biped is near by to an object
----@param biped blamObject
+---Get distance between two objects
+---@param object blamObject
 ---@param target blamObject
----@param sensitivity number
-function core.objectIsNearTo(biped, target, sensitivity)
-    if target and biped then
-        local distance = sqrt((target.x - biped.x) ^ 2 + (target.y - biped.y) ^ 2 +
-                                  (target.z - biped.z) ^ 2)
-        if abs(distance) < sensitivity then
+---@return number distance
+function core.getDistanceBetweenObjects(object, target)
+    if target and object then
+        local distance = sqrt((target.x - object.x) ^ 2 + (target.y - object.y) ^ 2 +
+                                  (target.z - object.z) ^ 2)
+        return distance
+    end
+    return 0
+end
+
+--- Check if object is near by to another object
+---@param object blamObject
+---@param target blamObject
+---@param proximityThreshold number
+function core.objectIsNearTo(object, target, proximityThreshold)
+    if target and object then
+        local distance = core.getDistanceBetweenObjects(object, target)
+        if abs(distance) < proximityThreshold then
+            return true
+        end
+    end
+    return false
+end
+
+
+--- Check if object is near by to another object
+---@param object blamObject
+---@param target blamObject
+---@param proximityThreshold number
+function core.objectIsNearToFast(object, target, proximityThreshold)
+    if target and object then
+        local dx = target.x - object.x
+        local dy = target.y - object.y
+        local dz = target.z - object.z
+        local distanceSquared = dx * dx + dy * dy + dz * dz
+        local thresholdSquared = proximityThreshold * proximityThreshold
+        if distanceSquared < thresholdSquared then
             return true
         end
     end
@@ -478,7 +500,7 @@ end
 ---@param localObjectId number
 ---@return number?
 function core.getSyncedIndexByObjectId(localObjectId)
-    for index = 0, 509 do
+    for index = 0, blam.getMaximumNetworkObjects() do
         local objectId = blam.getObjectIdBySyncedIndex(index)
         if objectId and objectId == localObjectId then
             return index
@@ -534,40 +556,39 @@ function core.objectIsLookingAt(mainObject, target, sensitivity, zOffset, maximu
     return false
 end
 
---- Get the synced biped ids
----@return number[]
-function core.getSyncedBipedIds()
-    local syncedBipedIds = {}
-    for index = 0, 509 do
+--- Get network synced bipeds
+---@return {handle: number, syncedIndex: number}[]
+function core.getNetworkBipeds()
+    local networkBipeds = {}
+    for index = 0, blam.getMaximumNetworkObjects() do
         local objectId = blam.getObjectIdBySyncedIndex(index)
         if objectId then
             local object = blam.object(get_object(objectId))
             if object and object.class == blam.objectClasses.biped then
-                -- table.insert(syncedBipedIds, objectId)
-                syncedBipedIds[index] = objectId
+                table.insert(networkBipeds, {handle = objectId, syncedIndex = index})
             end
         end
     end
-    return syncedBipedIds
+    return networkBipeds
 end
 
---- Get the synced biped ids
----@return number[]
-function core.getSyncedObjectsIds()
-    local syncedObjectsIds = {}
-    for index = 0, 509 do
+--- Get network synced objects
+---@return {handle: number, syncedIndex: number}[]
+function core.getNetworkObjects()
+    local networkObjectHandles = {}
+    for index = 0, blam.getMaximumNetworkObjects() do
         local objectId = blam.getObjectIdBySyncedIndex(index)
         if objectId then
             local object = blam.object(get_object(objectId))
             if object then
-                table.insert(syncedObjectsIds, objectId)
+                table.insert(networkObjectHandles, {handle = objectId, syncedIndex = index})
             end
         end
     end
-    return syncedObjectsIds
+    return networkObjectHandles
 end
 
----Validate if a biped is syncable
+---Validate if a biped is synchronizable
 ---@param object blamObject
 ---@param objectId number
 function core.isObjectSynceable(object, objectId)
@@ -587,9 +608,6 @@ function core.isObjectSynceable(object, objectId)
     -- Only sync ai inside the same bsp as the players
     if object.isOutSideMap then
         return false
-    end
-    if isNull(object.nameIndex) then
-        -- return false
     end
     return true
 end
@@ -689,7 +707,7 @@ local previouslyNetworkedObjects = {}
 ---
 --- **NOTE**: Objects that were created by the server but never networked at some point will also be erased
 function core.eraseNotServerControlledObjects()
-    for objectIndex = 0, 2047 do
+    for objectIndex = 0, blam.MAXIMUM_OBJECTS - 1 do
         local object, objectHandle = blam.getObject(objectIndex)
         if object and objectHandle then
             local isBiped = object.class == objectClasses.biped
@@ -723,5 +741,65 @@ function core.eraseNotServerControlledObjects()
         end
     end
 end
+
+--- Disable biped feign death chance
+--- Modifies all biped tags to have 0% feign death chance
+function core.disableBipedsFeignDeathChance()
+    ---@type MetaEngineBipedTag[]
+    local bipedEntries = blam2.tag.findTags("", blam2.tag.groups.biped)
+    for _, bipedEntry in pairs(bipedEntries) do
+        local bipedTag = bipedEntry.data
+        bipedTag.base.feignDeathChance = 0
+        bipedTag.base.feignDeathThreshold = 0
+    end
+end
+
+---Dynamically control networked items to prevent them from despawning
+function core.dynamicallyControlNetworkItems()
+    --local scenarioEntry = blam2.tag.findTag("", blam2.tag.groups.scenario)
+    --assert(scenarioEntry, "Failed to load scenario")
+    for objectIndex = 0, blam.MAXIMUM_OBJECTS - 1 do
+        local object, objectHandle = blam.getObject(objectIndex)
+        if object and objectHandle then
+            local isWeapon = object.class == objectClasses.weapon
+            local isEquipment = object.class == objectClasses.equipment
+            local isItem = isWeapon or isEquipment
+            local isPlayerOwned = not isNull(object.playerId)
+            local isNetworkObject = not (object.networkRoleClass ==
+                                        objectNetworkRoleClasses.localOnly)
+            local isNamedObject = not isNull(object.nameIndex)
+            if isItem and isNetworkObject then
+                local item = blam.item(get_object(objectHandle))
+                assert(item, "Failed to load item object")
+                if isNamedObject then
+                    -- Keep named objects from despawning for scripting purposes
+                    item.lastUpdateTick = engine.core.getTickCount()
+                else
+                    --local isBudgetExceeded = core.getNetworkObjectsCount() > constants.maximumNetworkObjectsForItems
+                    local isBudgetExceeded = false
+                    -- Only control networked items that are not player owned
+                    if not isPlayerOwned then
+                        if isBudgetExceeded then
+                            -- Allow collection of items to free up network object slots
+                            item.lastUpdateTick = 0
+                        else
+                            -- Prevent collection of named objects to avoid losing them
+                            item.lastUpdateTick = engine.core.getTickCount()
+                        end
+                    end
+                    if isWeapon then
+                        local weapon = blam.weapon(get_object(objectHandle))
+                        if weapon and weapon.totalAmmo == 0 then
+                            -- Remove empty weapons to free up network object slots
+                            item.lastUpdateTick = 0
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+
 
 return core

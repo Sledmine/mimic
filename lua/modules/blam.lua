@@ -19,9 +19,10 @@ local round = math.round or function(num)
     return math.floor(num + 0.5)
 end
 
-local blam = {_VERSION = "1.17.0"}
+local blam = {_VERSION = "1.17.1"}
 
 blam.MAXIMUM_OBJECTS = 2048
+blam.MAXIMUM_NETWORK_OBJECTS = 512 - 3
 
 ------------------------------------------------------------------------------
 -- Useful functions for internal usage
@@ -374,8 +375,6 @@ local dPadValues = {
     down = 769,
     up = 765
 }
-
-local engineConstants = {defaultNetworkObjectsCount = 509}
 
 -- Global variables
 
@@ -753,7 +752,6 @@ end
 if register_callback then
     -- Provide global server type variable on SAPP
     server_type = "sapp"
-    print("Compatibility with Chimera Lua API has been loaded!")
 else
     console_is_open = backupFunctions.console_is_open
     console_out = backupFunctions.console_out
@@ -3182,11 +3180,13 @@ end
 function blam.getMaximumNetworkObjects()
     local syncedObjectsTable = getSyncedObjectsTable()
     if not syncedObjectsTable then
-        return engineConstants.defaultNetworkObjectsCount
+        return blam.MAXIMUM_NETWORK_OBJECTS
     end
 
     -- For some reason fist element entry is always used, so we need to substract 1
-    return syncedObjectsTable.maximumObjectsCount - 1
+    local logicCount = syncedObjectsTable.maximumObjectsCount - 1
+    -- Return less to prevent saturation issues (reading latest objects cause problems)
+    return logicCount - 2
 end
 
 --- Return an element from the synced objects table

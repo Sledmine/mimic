@@ -361,14 +361,15 @@ function OnTick()
                     timeSinceLastPacket = currentTime
                 end
                 nearestAIDetails = ""
-                for syncedIndex, objectId in pairs(core.getSyncedBipedIds()) do
-                    local biped = blam.biped(get_object(objectId))
-                    if biped and core.objectIsLookingAt(get_dynamic_player(), objectId, 0.5, 0, 10) then
+                for _, networkBiped in pairs(core.getNetworkBipeds()) do
+                    local biped = blam.biped(get_object(networkBiped.handle))
+                    if biped and core.objectIsLookingAt(get_dynamic_player(), networkBiped.handle, 0.5, 0, 10) then
+                        local syncedIndex = networkBiped.syncedIndex
                         local tag = blam.getTag(biped.tagId)
                         assert(tag, "Error, tag not found")
                         nearestAIDetails = ("%s -> serverId: %s -> localId: %s"):format(tag.path,
                                                                                         syncedIndex,
-                                                                                        objectId)
+                                                                                        networkBiped.handle)
                     end
                 end
             end
@@ -443,12 +444,19 @@ function OnPreFrame()
         draw_text(nearestAIDetails, bounds.left, bounds.top, bounds.right, bounds.bottom, font,
                   align, table.unpack(textColor))
 
-        local syncDetails = "Network objects: %s / Synced Bipeds: %s / Mimic packets per second: %s"
-        local networkObjectsCount = #table.keys(core.getSyncedObjectsIds())
-        local syncedBipedsCount = #table.keys(core.getSyncedBipedIds())
+        local syncDetails = "Network objects: %s / Network bipeds: %s / Mimic packets per second: %s"
+        local networkObjectsCount = #core.getNetworkObjects()
+        local syncedBipedsCount = #core.getNetworkBipeds()
         draw_text(syncDetails:format(networkObjectsCount, syncedBipedsCount, packetsPerSecond),
                   bounds.left, bounds.top + 30, bounds.right, bounds.bottom, font, align,
                   table.unpack(textColor))
+        -- Draw player ping
+        local player = blam.player(get_player())
+        if player then
+            local ping = player.ping
+            draw_text("Player ping: " .. ping .. " ms", bounds.left, bounds.top + 60, bounds.right,
+                      bounds.bottom, font, align, table.unpack(textColor))
+        end
     end
 end
 

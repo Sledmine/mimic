@@ -7,5 +7,5 @@ return {
     syncBoundingRadius = 0.75,
     -- Prevent player network messages from being flooded by custom messages
     startSyncingAfterMillisecs = 2500,
-    maximumSyncInterval = 165 -- Maximum time between syncs (5 ticks delay at 33ms)
+    maximumSyncInterval = 167 -- Maximum time between syncs (5 ticks delay at 33ms)
 }
