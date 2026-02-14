@@ -19,7 +19,7 @@ local round = math.round or function(num)
     return math.floor(num + 0.5)
 end
 
-local blam = {_VERSION = "1.17.1"}
+local blam = {_VERSION = "1.17.2"}
 
 blam.MAXIMUM_OBJECTS = 2048
 blam.MAXIMUM_NETWORK_OBJECTS = 512 - 3
@@ -443,21 +443,30 @@ backupFunctions.file_exists = _G.file_exists
 ---Attempt to spawn an object given tag class, tag path and coordinates.
 ---Given a tag id is also accepted.
 ---@overload fun(tagId: number, x: number, y: number, z: number):number
----@param tagClass tagClasses Type of the tag to spawn
----@param tagPath string Path of object to spawn
----@param x number
----@param y number
----@param z number
+---@overload fun(tagClass: tagClasses, tagPath: string, x: number, y: number, z: number):number
 ---@return number? objectId
-function spawn_object(tagClass, tagPath, x, y, z)
-    if type(tagClass) == "number" then
-        local x = tagPath --[[@as number]]
-        local y = x
-        local z = y
-        local tag = blam.getTag(tagClass)
+function spawn_object(...)
+    local args = {...}
+    local tagClass, tagPath, x, y, z
+    if #args == 4 then
+        local tagHandle = args[1]
+        x = args[2]
+        y = args[3]
+        z = args[4]
+        local tag = blam.getTag(tagHandle)
         if tag then
-            return backupFunctions.spawn_object(tag.class, tag.path, x, y, z)
+            --logger:debug("Spawning object by class {} tag handle {} with path {}", tag.class, tohex(tagHandle), tag.path)
+            tagClass = tag.class
+            tagPath = tag.path
         end
+    elseif #args == 5 then
+        tagClass = args[1]
+        tagPath = args[2]
+        x = args[3]
+        y = args[4]
+        z = args[5]
+    else
+        error("Invalid arguments to spawn_object")
     end
     return backupFunctions.spawn_object(tagClass, tagPath, x, y, z)
 end
@@ -752,6 +761,7 @@ end
 if register_callback then
     -- Provide global server type variable on SAPP
     server_type = "sapp"
+    print("Compatibility with Chimera Lua API has been loaded!")
 else
     console_is_open = backupFunctions.console_is_open
     console_out = backupFunctions.console_out
@@ -2301,6 +2311,7 @@ local itemStructure = extendStructure(objectStructure, {
 ---@class weapon : item
 ---@field pressedReloadKey boolean Is weapon trying to reload
 ---@field isWeaponPunching boolean Is weapon playing melee or grenade animation
+---@field age number Age of the weapon in ticks
 ---@field ownerObjectId number Object ID of the weapon owner
 ---@field carrierObjectId number Object ID of the weapon owner
 ---@field primaryTriggerState number Primary trigger state of the weapon
@@ -2313,6 +2324,7 @@ local weaponStructure = extendStructure(itemStructure, {
     carrierObjectId = {type = "dword", offset = 0x11C},
     pressedReloadKey = {type = "bit", offset = 0x230, bitLevel = 3},
     isWeaponPunching = {type = "bit", offset = 0x230, bitLevel = 4},
+    age = {type = "float", offset = 0x240},
     primaryTriggerState = {type = "byte", offset = 0x261},
     totalAmmo = {type = "word", offset = 0x2B6},
     loadedAmmo = {type = "word", offset = 0x2B8},
@@ -3553,9 +3565,10 @@ function blam.getAbsoluteObjectCoordinates(object)
     if not isNull(object.parentObjectId) then
         local parentObject = blam.object(get_object(object.parentObjectId))
         if parentObject then
-            coordinates.x = coordinates.x + parentObject.x
-            coordinates.y = coordinates.y + parentObject.y
-            coordinates.z = coordinates.z + parentObject.z
+           local parentCoordinates = blam.getAbsoluteObjectCoordinates(parentObject)
+           coordinates.x = coordinates.x + parentCoordinates.x
+           coordinates.y = coordinates.y + parentCoordinates.y
+           coordinates.z = coordinates.z + parentCoordinates.z
         end
     end
     return coordinates

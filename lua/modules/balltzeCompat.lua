@@ -33,10 +33,24 @@ end
 function Engine.gameState.createObject(tagHandle, parentObjectHandle, position)
     if type(tagHandle) == "number" then
         local handleValue = spawn_object(tagHandle, position.x, position.y, position.z)
-        return {value = handleValue}
+        return {
+            value = handleValue,
+            index = blam.getIndexById(handleValue),
+            id = handleValue,
+            isNull = function()
+                return blam.isNull(handleValue)
+            end
+        }
     end
     local handleValue = spawn_object(tagHandle.value, position.x, position.y, position.z)
-    return {value = handleValue}
+    return {
+        value = handleValue,
+        index = blam.getIndexById(handleValue),
+        id = handleValue,
+        isNull = function()
+            return blam.isNull(handleValue)
+        end
+    }
 end
 
 -- Get a player
