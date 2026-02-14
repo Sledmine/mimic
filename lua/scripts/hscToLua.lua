@@ -37,7 +37,7 @@ local argparse = require "lua.scripts.modules.argparse"
 local hscDoc = require "lua.modules.hscDoc"
 
 local parser = argparse("hscToLua", "Transpiler for HSC (Halo Script Language) to Lua")
-parser:argument("input", "Input HSC files to transpile"):args("*")
+parser:argument("input", "Input HSC files to transpile"):args("+")
 parser:option("-o --output", "Output Lua file to save the transpiled code", "output.lua")
 parser:flag("--debug", "Enable debug mode")
 parser:option("-m --module", "Write script as a module with a given name")
@@ -185,7 +185,7 @@ local function convertAstToLua(astNode)
                     varValue = luna.bool(varValue)
                 elseif isNumber(varValue) then
                     varValue = tonumber(varValue)
-                else
+                elseif not isSymbolAVariable(varValue) then
                     varValue = escapeStringValue(varValue)
                 end
             end
