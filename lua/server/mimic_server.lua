@@ -16,7 +16,8 @@ require "compat53"
 require "balltzeCompat"
 
 -- Pre require structures for blam2
-require "structures.biped"
+require "structures.tag.biped"
+require "structures.tag.scenario"
 
 local blam = require "blam"
 console_out = cprint
@@ -33,13 +34,15 @@ local script = require "script"
 local sleep = script.sleep
 
 -- Settings
-DebugMode = false
+DebugMode = true
 local bspIndexAddress = 0x40002CD8
+local itemCollectionThresholdAddress = 0x0045adb1
 local rconPasswordAddress
 local failMessageAddress
 local allowClientSideWeaponProjectilesAddress
 local serverRconPassword
 local enableSyncUpdate = true
+local isItemsSystemOverridden = false
 
 -- State
 local deviceMachinesList = {}
@@ -57,6 +60,15 @@ local function setServerSideProjectiles(enable)
         logger:error("Error no address found for client side weapon projectiles")
     end
     write_byte(allowClientSideWeaponProjectilesAddress, enable and 0x0 or 0x1)
+end
+
+local function setItemCollectionThreshold(ticks)
+    safe_write(true)
+    -- Change engine item collection threshold
+    write_dword(itemCollectionThresholdAddress + 0x2, ticks)
+    safe_write(false)
+    logger:info("Item collection threshold set to {} ticks ({} seconds)", ticks,
+                blam.ticksToSeconds(ticks))
 end
 
 local function broadcastMessage(message)
@@ -116,7 +128,12 @@ end
 ---@param unit unit
 ---@param serverObjectId number
 ---@param syncedIndex number
-local function updateNetworkObject(playerIndex, unit, serverObjectId, syncedIndex)
+---@param considerLookingAt boolean
+local function updateNetworkObject(playerIndex,
+                                   unit,
+                                   serverObjectId,
+                                   syncedIndex,
+                                   considerLookingAt)
     local player = blam.biped(get_dynamic_player(playerIndex))
     if not player then
         return
@@ -130,11 +147,25 @@ local function updateNetworkObject(playerIndex, unit, serverObjectId, syncedInde
     -- Sync AI biped if it is near to the player
     local cinematicGlobals = blam.cinematicGlobals()
     if isNull(player.vehicleObjectId) then
-        if cinematicGlobals.isInProgress or
-            (core.objectIsNearTo(player, unit, constants.syncDistance) and
-                core.objectIsLookingAt(get_dynamic_player(playerIndex) --[[@as number]] ,
-                                       serverObjectId, constants.syncBoundingRadius, 0,
-                                       constants.syncDistance)) then
+        local isObjectSynchronizable = false
+        -- Only sync if player is near to the object
+        local isPlayerNear = core.isObjectNearToObject(player, unit, constants.syncDistance)
+        if isPlayerNear then
+            isObjectSynchronizable = true
+            if considerLookingAt then
+                isObjectSynchronizable =
+                    core.objectIsLookingAt(get_dynamic_player(playerIndex) --[[@as number]] ,
+                                           serverObjectId, constants.syncBoundingRadius, 0,
+                                           constants.syncDistance)
+            end
+        end
+        -- Always sync if cinematic is in progress
+        -- Needed to sync certain objects during cinematics that are far from the player but close to the camera
+        -- TODO Change this to use the camera position instead (cameras in the server side work differently)
+        if cinematicGlobals.isInProgress then
+            isObjectSynchronizable = true
+        end
+        if isObjectSynchronizable then
             local updatePacket = core.updateObjectPacket(syncedIndex, unit)
             if updatePacket and syncedIndex then
                 monocastMessage(playerIndex, updatePacket)
@@ -142,7 +173,7 @@ local function updateNetworkObject(playerIndex, unit, serverObjectId, syncedInde
         end
     else
         local vehicle = blam.object(get_object(player.vehicleObjectId))
-        if vehicle and core.objectIsNearTo(vehicle, unit, constants.syncDistance) then
+        if vehicle and core.isObjectNearToObject(vehicle, unit, constants.syncDistance) then
             local updatePacket = core.updateObjectPacket(syncedIndex, unit)
             if updatePacket and syncedIndex then
                 monocastMessage(playerIndex, updatePacket)
@@ -171,7 +202,7 @@ local function updateNetworkObjectNoLook(playerIndex, unit, serverObjectId, sync
     local cinematicGlobals = blam.cinematicGlobals()
     if isNull(player.vehicleObjectId) then
         if cinematicGlobals.isInProgress or
-            (core.objectIsNearTo(player, unit, constants.syncDistance)) then
+            (core.isObjectNearToObject(player, unit, constants.syncDistance)) then
             local updatePacket = core.updateObjectPacket(syncedIndex, unit)
             if updatePacket and syncedIndex then
                 monocastMessage(playerIndex, updatePacket)
@@ -179,7 +210,7 @@ local function updateNetworkObjectNoLook(playerIndex, unit, serverObjectId, sync
         end
     else
         local vehicle = blam.object(get_object(player.vehicleObjectId))
-        if vehicle and core.objectIsNearTo(vehicle, unit, constants.syncDistance) then
+        if vehicle and core.isObjectNearToObject(vehicle, unit, constants.syncDistance) then
             local updatePacket = core.updateObjectPacket(syncedIndex, unit)
             if updatePacket and syncedIndex then
                 monocastMessage(playerIndex, updatePacket)
@@ -226,6 +257,7 @@ function SyncUpdate(playerIndex)
                         end
 
                         if core.unitPropertiesShouldBeSynced(unit, lastObjectState) then
+                            -- TODO Check on a better implementation for this, it is overkill
                             lastObjectState = blam.dumpObject(unit)
                             lastObjectStatePerPlayer[playerIndex][syncedIndex] = lastObjectState
                             monocastMessage(playerIndex,
@@ -248,6 +280,9 @@ function SyncUpdate(playerIndex)
                             lastObjectState.nameIndex = item.nameIndex
                             lastObjectStatePerPlayer[playerIndex][syncedIndex] = lastObjectState
                             monocastMessage(playerIndex, core.updateItemPacket(syncedIndex, item))
+                            logger:debug(
+                                "Item with handle {} has name index {}, syncing to player {}",
+                                objectHandle, item.nameIndex, playerIndex)
                         end
                     end
                 end
@@ -263,12 +298,16 @@ function SyncUpdate(playerIndex)
                 if object then
                     local isUnit = object.class == objectClasses.biped or object.class ==
                                        objectClasses.vehicle
+                    local isVehicle = object.class == objectClasses.vehicle
                     local unit = blam.unit(object.address)
                     assert(unit, "Unit cast failed")
                     local syncedIndex = core.getSyncedIndexByObjectId(objectHandle)
                     if isUnit and syncedIndex and core.isObjectSynceable(object, objectHandle) then
-                        --updateNetworkObjectNoLook(playerIndex, unit, objectHandle, syncedIndex)
-                        updateNetworkObject(playerIndex, unit, objectHandle, syncedIndex)
+                        if isVehicle then
+                            updateNetworkObjectNoLook(playerIndex, unit, objectHandle, syncedIndex)
+                        else
+                            updateNetworkObject(playerIndex, unit, objectHandle, syncedIndex)
+                        end
                     end
                 end
             end
@@ -311,7 +350,7 @@ function RegisterPlayerSync(playerIndex)
 end
 
 -- This causes crashes because coroutines can not yield inside a timer function nor an event (?)
---script.continuous(function()
+-- script.continuous(function()
 --    -- sleep(blam.secondsToTicks(constants.startSyncingAfterMillisecs / 1000))
 --    sleep(blam.secondsToTicks(1))
 --    for playerIndex = 1, 16 do
@@ -327,7 +366,7 @@ end
 --            set_timer(constants.startSyncingAfterMillisecs, "RegisterPlayerSync", playerIndex)
 --        end)
 --    end
---end)
+-- end)
 
 function OnPlayerJoin(playerIndex)
     -- Sync game data just required when the game starts
@@ -344,7 +383,7 @@ function OnPlayerLeave(playerIndex)
     local syncUpdateFuncName = "SyncUpdate" .. playerIndex
     _G[syncUpdateFuncName] = function()
         logger:debug("Removing SyncUpdate timer for player {}", playerIndex)
-        --_G[syncUpdateFuncName] = nil
+        -- _G[syncUpdateFuncName] = nil
         return false
     end
 end
@@ -397,27 +436,47 @@ function OnMapLoad()
     currentScenario = blam.scenario(0)
     assert(currentScenario, "No current scenario tag found")
     if currentScenario.encounterPaletteCount > 0 then
-        logger:warning("Scenario has AI encounters, enabling projectiles sync")
+        logger:warning("Scenario has AI encounters, assuming AI synchronization is required")
         setServerSideProjectiles(true)
+        isItemsSystemOverridden = true
     else
+        isItemsSystemOverridden = false
         setServerSideProjectiles(false)
     end
     -- Disable feign death chance to prevent buggy behavior with AI synchronization
     core.disableBipedsFeignDeathChance()
-end
+    -- Reset created tracked items
+    core.dynamicallySpawnScenarioItems(true)
 
-script.continuous(function()
+    -- Debug loop to print network objects, useful to detect maps with too many network objects
     if DebugMode then
-        local memoryUsage = collectgarbage("count") / 1024
-        local memoryText = string.format("Mimic script memory usage: %.2f MB", memoryUsage)
-        logger:debug(memoryText)
-        printNetworkObjects()
-        script.sleep(blam.secondsToTicks(4))
+        script.continuous(function()
+            local memoryUsage = collectgarbage("count") / 1024
+            local memoryText = string.format("Mimic script memory usage: %.2f MB", memoryUsage)
+            logger:debug(memoryText)
+            printNetworkObjects()
+            script.sleep(blam.secondsToTicks(4))
+        end)
     end
-    -- Not sure if we will leave this here, Coop Evolved implemented this instead
-    --script.sleep(blam.secondsToTicks(1))
-    --core.dynamicallyControlNetworkItems()
-end)
+
+    -- Continuously control network items to prevent them from despawning
+    script.continuous(function()
+        if isItemsSystemOverridden then
+            -- logger:debug("Dynamically controlling network items...")
+            core.dynamicallyControlNetworkItems()
+            script.sleep(10)
+        end
+    end)
+
+    -- Continuously respawn scenario items to ensure players will have ammo and weapons
+    script.continuous(function()
+        if isItemsSystemOverridden then
+            logger:debug("Respawning scenario items...")
+            core.dynamicallySpawnScenarioItems()
+            script.sleep(blam.secondsToTicks(10))
+        end
+    end)
+end
 
 function OnTick()
     -- Check for BSP Changes
@@ -535,6 +594,7 @@ function OnCommand(playerIndex, command, environment, rconPassword)
 end
 
 function OnScriptLoad()
+    setItemCollectionThreshold(blam.secondsToTicks(15))
     core.patchPlayerConnectionTimeout()
     rconPasswordAddress = read_dword(sig_scan("7740BA??????008D9B000000008A01") + 0x3)
     failMessageAddress = read_dword(sig_scan("B8????????E8??000000A1????????55") + 0x1)

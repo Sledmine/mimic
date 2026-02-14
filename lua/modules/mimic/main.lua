@@ -5,6 +5,7 @@
 ------------------------------------------------------------------------------
 local blam = require "blam"
 local script = require "script"
+local constants = require "mimic.constants"
 local sleep = script.sleep
 objectClasses = blam.objectClasses
 tagClasses = blam.tagClasses
@@ -29,6 +30,7 @@ local firstTickAlready = false
 local packetCount = 0
 local packetsPerSecond = 0
 local timeSinceLastPacket = os.clock()
+local isItemsSystemOverridden = false
 
 -- Debug draw thing
 local nearestAIDetails = ""
@@ -350,8 +352,8 @@ function OnTick()
     end
     core.disablePlayerCollision(DisablePlayerCollision)
     -- Start removing the server created bipeds only when the server aks for it
-    if blam.isGameDedicated() then
-        if DebugMode then
+    if DebugMode then
+        if engine.netgame.getServerType() ~= "none" then
             if engine.gameState.getPlayer() then
                 local currentTime = os.time()
                 local elapsed = currentTime - timeSinceLastPacket
@@ -363,7 +365,8 @@ function OnTick()
                 nearestAIDetails = ""
                 for _, networkBiped in pairs(core.getNetworkBipeds()) do
                     local biped = blam.biped(get_object(networkBiped.handle))
-                    if biped and core.objectIsLookingAt(get_dynamic_player(), networkBiped.handle, 0.5, 0, 10) then
+                    if biped and
+                        core.objectIsLookingAt(get_dynamic_player(), networkBiped.handle, 0.5, 0, 10) then
                         local syncedIndex = networkBiped.syncedIndex
                         local tag = blam.getTag(biped.tagId)
                         assert(tag, "Error, tag not found")
@@ -384,6 +387,32 @@ script.continuous(function()
         sleep(30)
         core.eraseNotServerControlledObjects()
         -- engine.hsc.executeScript("ai_erase_all")
+    end
+end)
+
+script.continuous(function()
+    if isItemsSystemOverridden then
+        if engine.netgame.getServerType() == "local" then
+            if firstTickAlready then
+                -- Save CPU by sleeping a bit
+                logger:info("Dynamically controlling network items...")
+                core.dynamicallyControlNetworkItems()
+                -- sleep(blam.secondsToTicks(5))
+                sleep(10)
+            end
+        end
+    end
+end)
+
+script.continuous(function()
+    if isItemsSystemOverridden then
+        if engine.netgame.getServerType() == "local" then
+            if firstTickAlready then
+                --logger:debug("Respawning scenario items...")
+                core.dynamicallySpawnScenarioItems()
+                script.sleep(blam.secondsToTicks(10))
+            end
+        end
     end
 end)
 
@@ -444,12 +473,21 @@ function OnPreFrame()
         draw_text(nearestAIDetails, bounds.left, bounds.top, bounds.right, bounds.bottom, font,
                   align, table.unpack(textColor))
 
-        local syncDetails = "Network objects: %s / Network bipeds: %s / Mimic packets per second: %s"
+        local syncDetails =
+            "Network objects: %s / Network items: %s / Network bipeds: %s / Mimic packets per second: %s"
         local networkObjectsCount = #core.getNetworkObjects()
+        local networkItems = table.filter(core.getNetworkObjects(), function(object)
+            local object = blam.getObject(object.handle)
+            local isItem = object and object.class and
+                               (object.class == objectClasses.weapon or object.class ==
+                                   objectClasses.equipment)
+            return isItem
+        end)
+        local networkItemsCount = #networkItems
         local syncedBipedsCount = #core.getNetworkBipeds()
-        draw_text(syncDetails:format(networkObjectsCount, syncedBipedsCount, packetsPerSecond),
-                  bounds.left, bounds.top + 30, bounds.right, bounds.bottom, font, align,
-                  table.unpack(textColor))
+        draw_text(syncDetails:format(networkObjectsCount, networkItemsCount, syncedBipedsCount,
+                                     packetsPerSecond), bounds.left, bounds.top + 30, bounds.right,
+                  bounds.bottom, font, align, table.unpack(textColor))
         -- Draw player ping
         local player = blam.player(get_player())
         if player then

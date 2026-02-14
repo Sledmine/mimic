@@ -1,6 +1,7 @@
 local inspect = require "inspect"
 local luna = require "luna"
 local hscDoc = require "hscDoc"
+local constants = require "mimic.constants"
 local split = luna.string.split
 local tohex = luna.string.tohex
 local fromhex = luna.string.fromhex
@@ -375,8 +376,11 @@ end
 ---@return number distance
 function core.getDistanceBetweenObjects(object, target)
     if target and object then
-        local distance = sqrt((target.x - object.x) ^ 2 + (target.y - object.y) ^ 2 +
-                                  (target.z - object.z) ^ 2)
+        local objectCoordinates = blam.getAbsoluteObjectCoordinates(object)
+        local targetCoordinates = blam.getAbsoluteObjectCoordinates(target)
+        local distance = sqrt((targetCoordinates.x - objectCoordinates.x) ^ 2 +
+                                  (targetCoordinates.y - objectCoordinates.y) ^ 2 +
+                                  (targetCoordinates.z - objectCoordinates.z) ^ 2)
         return distance
     end
     return 0
@@ -385,30 +389,29 @@ end
 --- Check if object is near by to another object
 ---@param object blamObject
 ---@param target blamObject
----@param proximityThreshold number
-function core.objectIsNearTo(object, target, proximityThreshold)
+---@param maximumDistance number
+function core.isObjectNearToObject(object, target, maximumDistance)
     if target and object then
         local distance = core.getDistanceBetweenObjects(object, target)
-        if abs(distance) < proximityThreshold then
+        if abs(distance) <= maximumDistance then
             return true
         end
     end
     return false
 end
 
-
---- Check if object is near by to another object
+---Check if object is near to position
 ---@param object blamObject
----@param target blamObject
----@param proximityThreshold number
-function core.objectIsNearToFast(object, target, proximityThreshold)
-    if target and object then
-        local dx = target.x - object.x
-        local dy = target.y - object.y
-        local dz = target.z - object.z
-        local distanceSquared = dx * dx + dy * dy + dz * dz
-        local thresholdSquared = proximityThreshold * proximityThreshold
-        if distanceSquared < thresholdSquared then
+---@param position {x: number, y: number, z: number}
+---@param maximumDistance number
+---@return boolean
+function core.isObjectNearToPosition(object, position, maximumDistance)
+    if object and position then
+        local objectCoordinates = blam.getAbsoluteObjectCoordinates(object)
+        local distance = sqrt((position.x - objectCoordinates.x) ^ 2 +
+                                  (position.y - objectCoordinates.y) ^ 2 +
+                                  (position.z - objectCoordinates.z) ^ 2)
+        if abs(distance) <= maximumDistance then
             return true
         end
     end
@@ -570,22 +573,6 @@ function core.getNetworkBipeds()
         end
     end
     return networkBipeds
-end
-
---- Get network synced objects
----@return {handle: number, syncedIndex: number}[]
-function core.getNetworkObjects()
-    local networkObjectHandles = {}
-    for index = 0, blam.getMaximumNetworkObjects() do
-        local objectId = blam.getObjectIdBySyncedIndex(index)
-        if objectId then
-            local object = blam.object(get_object(objectId))
-            if object then
-                table.insert(networkObjectHandles, {handle = objectId, syncedIndex = index})
-            end
-        end
-    end
-    return networkObjectHandles
 end
 
 ---Validate if a biped is synchronizable
@@ -754,10 +741,97 @@ function core.disableBipedsFeignDeathChance()
     end
 end
 
+--- Get network synced objects
+---@return {handle: number, syncedIndex: number}[]
+function core.getNetworkObjects()
+    local networkObjectHandles = {}
+    for index = 0, blam.getMaximumNetworkObjects() do
+        local objectId = blam.getObjectIdBySyncedIndex(index)
+        if objectId then
+            local object = blam.object(get_object(objectId))
+            if object then
+                table.insert(networkObjectHandles, {handle = objectId, syncedIndex = index})
+            end
+        end
+    end
+    return networkObjectHandles
+end
+
+--- Get all networked objects count
+---@return number networkObjectsCount
+function core.getNetworkObjectsCount()
+    local networkObjects = core.getNetworkObjects()
+    return #networkObjects
+end
+
+local isWeaponEmptyRemovalEnabled = false
+
+local function evaluateObjectKeeper(item, objectHandle, networkItemsCount)
+    -- Clear items that we clearly don't want to keep
+    if item.isOutSideMap then
+        -- Force item to despawn if outside map
+        item.lastUpdateTick = 0
+        return
+    end
+    if isWeaponEmptyRemovalEnabled then
+        local isWeapon = item.class == objectClasses.weapon
+        if isWeapon then
+            local weapon = blam.weapon(get_object(objectHandle))
+            if weapon and weapon.age >= 1 then
+                -- Remove empty weapons to free up network object slots
+                item.lastUpdateTick = 0
+                return
+            end
+        end
+    end
+
+    -- Check if we are exceeding the network object budget, if so only keep items that are near players
+    local isBudgetExceeded = networkItemsCount > constants.maximumNetworkItems
+    if isBudgetExceeded then
+        -- Assume we don't want this item anymore, unless a player is nearby
+        item.lastUpdateTick = 0
+
+        -- Check if any player is near to item
+        local isAnyPlayerNear = false
+        for playerIndex = constants.firstPlayerIndex, constants.lastPlayerIndex do
+            local playerObject = blam.object(get_dynamic_player(playerIndex))
+            if core.isObjectNearToObject(item, playerObject, constants.maxItemDistanceRespawn) then
+                isAnyPlayerNear = true
+                break
+            end
+        end
+        if isAnyPlayerNear then
+            -- Keep item alive if any player is near
+            item.lastUpdateTick = engine.core.getTickCount()
+            logger:debug(
+                "Keeping item with handle {} alive because a player is nearby, distance: {}",
+                objectHandle, core.getDistanceBetweenObjects(item, playerObject))
+            return
+        end
+    end
+
+    -- Maybe we can here force spawn of objects if we have determined we ran of budget
+    -- But we will clear items after this tick, so can safely spawn more (?)
+
+    -- Keep item alive
+    item.lastUpdateTick = engine.core.getTickCount()
+end
+
 ---Dynamically control networked items to prevent them from despawning
 function core.dynamicallyControlNetworkItems()
-    --local scenarioEntry = blam2.tag.findTag("", blam2.tag.groups.scenario)
-    --assert(scenarioEntry, "Failed to load scenario")
+    -- local networkItemsCount = core.getItemNetworkObjectsCount()
+    local networkItemsCount = 0
+    -- Count it with a loop as doing with getNetworkObjects is too slow in Lua 5.3 for some reason
+    for index = 0, blam.getMaximumNetworkObjects() do
+        local objectId = blam.getObjectIdBySyncedIndex(index)
+        if objectId then
+            local object = blam.object(get_object(objectId))
+            if object and
+                (object.class == objectClasses.weapon or object.class == objectClasses.equipment) then
+                networkItemsCount = networkItemsCount + 1
+            end
+        end
+    end
     for objectIndex = 0, blam.MAXIMUM_OBJECTS - 1 do
         local object, objectHandle = blam.getObject(objectIndex)
         if object and objectHandle then
@@ -771,27 +845,122 @@ function core.dynamicallyControlNetworkItems()
             if isItem and isNetworkObject then
                 local item = blam.item(get_object(objectHandle))
                 assert(item, "Failed to load item object")
+                -- Always keep named objects from despawning
                 if isNamedObject then
-                    -- Keep named objects from despawning for scripting purposes
                     item.lastUpdateTick = engine.core.getTickCount()
                 else
-                    --local isBudgetExceeded = core.getNetworkObjectsCount() > constants.maximumNetworkObjectsForItems
-                    local isBudgetExceeded = false
-                    -- Only control networked items that are not player owned
-                    if not isPlayerOwned then
-                        if isBudgetExceeded then
-                            -- Allow collection of items to free up network object slots
-                            item.lastUpdateTick = 0
-                        else
-                            -- Prevent collection of named objects to avoid losing them
-                            item.lastUpdateTick = engine.core.getTickCount()
+                    evaluateObjectKeeper(item, objectHandle, networkItemsCount)
+                end
+            end
+        end
+    end
+end
+
+local trackedWeaponItems = {}
+local trackedEquipmentItems = {}
+
+-- Dynamically spawn scenario items
+function core.dynamicallySpawnScenarioItems(reset)
+    if reset then
+        trackedWeaponItems = {}
+        trackedEquipmentItems = {}
+        return
+    end
+    ---@type MetaEngineScenarioTag
+    local scenarioEntry = blam2.tag.findTag("", blam2.tag.groups.scenario)
+    assert(scenarioEntry, "Failed to load scenario")
+    local scenarioTag = scenarioEntry.data
+    for weaponElementIndex = 1, scenarioTag.weapons.count do
+        local existingObjectHandle = trackedWeaponItems[weaponElementIndex]
+        local weaponWillSpawn = not existingObjectHandle or not blam.getObject(existingObjectHandle)
+        if weaponWillSpawn then
+            -- if not existingObjectHandle then
+            local weaponElement = scenarioTag.weapons.elements[weaponElementIndex]
+            -- Only attempt to respawn items without names
+            if isNull(weaponElement.name) then
+                local paletteIndex = weaponElement.type
+                -- There might be weapon slots pointing to NULL entries in the palette?
+                if not isNull(paletteIndex) then
+                    local weaponPaletteEntry = scenarioTag.weaponPalette.elements[paletteIndex + 1]
+                    if weaponPaletteEntry then
+                        -- Check if any player is near to placement position
+                        local isAnyPlayerNear = false
+                        for playerIndex = constants.firstPlayerIndex, constants.lastPlayerIndex do
+                            local playerObject = blam.object(get_dynamic_player(playerIndex))
+                            if core.isObjectNearToPosition(playerObject,
+                                                           weaponElement.placement.position,
+                                                           constants.maxItemDistanceRespawn) then
+                                isAnyPlayerNear = true
+                                break
+                            end
+                        end
+                        if isAnyPlayerNear then
+                            logger:debug("Respawning item at weapon element index {}",
+                                         weaponElementIndex)
+                            local weaponTagHandle = weaponPaletteEntry.name.tagHandle
+                            local position = weaponElement.placement.position
+                            local spawnedObjectHandle =
+                                engine.gameState.createObject(weaponTagHandle, nil, {
+                                    x = position.x,
+                                    y = position.y,
+                                    z = position.z + 0.1
+                                }).value
+                            trackedWeaponItems[weaponElementIndex] = spawnedObjectHandle
+                            local object = blam.getObject(spawnedObjectHandle)
+                            if object then
+                                blam.rotateObject(object, weaponElement.placement.rotation.yaw,
+                                                  weaponElement.placement.rotation.pitch,
+                                                  weaponElement.placement.rotation.rotation)
+                            end
                         end
                     end
-                    if isWeapon then
-                        local weapon = blam.weapon(get_object(objectHandle))
-                        if weapon and weapon.totalAmmo == 0 then
-                            -- Remove empty weapons to free up network object slots
-                            item.lastUpdateTick = 0
+                end
+            end
+        end
+    end
+    -- Do the same but for equipment
+    for equipmentElementIndex = 1, scenarioTag.equipment.count do
+        local existingObjectHandle = trackedEquipmentItems[equipmentElementIndex]
+        if not existingObjectHandle or not blam.getObject(existingObjectHandle) then
+            -- if not existingObjectHandle then
+            local equipmentElement = scenarioTag.equipment.elements[equipmentElementIndex]
+            -- Only attempt to respawn items without names
+            if isNull(equipmentElement.name) then
+                local paletteIndex = equipmentElement.type
+                -- There might be equipment slots pointing to NULL entries in the palette?
+                if not isNull(paletteIndex) then
+                    local equipmentPaletteEntry =
+                        scenarioTag.equipmentPalette.elements[paletteIndex + 1]
+                    if equipmentPaletteEntry then
+                        -- Check if any player is near to placement position
+                        local isAnyPlayerNear = false
+                        for playerIndex = constants.firstPlayerIndex, constants.lastPlayerIndex do
+                            local playerObject = blam.object(get_dynamic_player(playerIndex))
+                            if core.isObjectNearToPosition(playerObject,
+                                                           equipmentElement.placement.position,
+                                                           constants.maxItemDistanceRespawn) then
+                                isAnyPlayerNear = true
+                                break
+                            end
+                        end
+                        if isAnyPlayerNear then
+                            logger:debug("Respawning item at equipment element index {}",
+                                         equipmentElementIndex)
+                            local equipmentTagHandle = equipmentPaletteEntry.name.tagHandle
+                            local position = equipmentElement.placement.position
+                            local spawnedObjectHandle =
+                                engine.gameState.createObject(equipmentTagHandle, nil, {
+                                    x = position.x,
+                                    y = position.y,
+                                    z = position.z + 0.1
+                                }).value
+                            trackedEquipmentItems[equipmentElementIndex] = spawnedObjectHandle
+                            local object = blam.getObject(spawnedObjectHandle)
+                            if object then
+                                blam.rotateObject(object, equipmentElement.placement.rotation.yaw,
+                                                  equipmentElement.placement.rotation.pitch,
+                                                  equipmentElement.placement.rotation.rotation)
+                            end
                         end
                     end
                 end
@@ -799,7 +968,5 @@ function core.dynamicallyControlNetworkItems()
         end
     end
 end
-
-
 
 return core
