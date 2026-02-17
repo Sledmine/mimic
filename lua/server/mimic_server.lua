@@ -34,7 +34,7 @@ local script = require "script"
 local sleep = script.sleep
 
 -- Settings
-DebugMode = true
+DebugMode = false
 local bspIndexAddress = 0x40002CD8
 local itemCollectionThresholdAddress = 0x0045adb1
 local rconPasswordAddress
