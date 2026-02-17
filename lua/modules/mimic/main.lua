@@ -382,7 +382,7 @@ end
 
 -- Continuously erase local bipeds, vehicles and weapons not controlled by the server
 script.continuous(function()
-    if isMimicRunning and firstTickAlready then
+    if isMimicRunning and firstTickAlready and engine.netgame.getServerType() == "dedicated" then
         -- Save CPU by sleeping a bit
         sleep(30)
         core.eraseNotServerControlledObjects()
@@ -391,7 +391,7 @@ script.continuous(function()
 end)
 
 script.continuous(function()
-    if isItemsSystemOverridden then
+    if isMimicRunning and isItemsSystemOverridden then
         if engine.netgame.getServerType() == "local" then
             if firstTickAlready then
                 -- Save CPU by sleeping a bit
@@ -405,7 +405,7 @@ script.continuous(function()
 end)
 
 script.continuous(function()
-    if isItemsSystemOverridden then
+    if isMimicRunning and isItemsSystemOverridden then
         if engine.netgame.getServerType() == "local" then
             if firstTickAlready then
                 --logger:debug("Respawning scenario items...")
