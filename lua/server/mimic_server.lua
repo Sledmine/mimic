@@ -182,43 +182,6 @@ local function updateNetworkObject(playerIndex,
     end
 end
 
---- Sync network object to player
----@param playerIndex number
----@param unit unit
----@param serverObjectId number
----@param syncedIndex number
-local function updateNetworkObjectNoLook(playerIndex, unit, serverObjectId, syncedIndex)
-    local player = blam.biped(get_dynamic_player(playerIndex))
-    if not player then
-        return
-    end
-    -- Prevents AI from running out of ammo
-    -- local aiWeapon = blam.weapon(get_object(ai.firstWeaponObjectId))
-    -- if aiWeapon then
-    --    -- TODO We should not use this
-    --    aiWeapon.totalAmmo = 999
-    -- end
-    -- Sync AI biped if it is near to the player
-    local cinematicGlobals = blam.cinematicGlobals()
-    if isNull(player.vehicleObjectId) then
-        if cinematicGlobals.isInProgress or
-            (core.isObjectNearToObject(player, unit, constants.syncDistance)) then
-            local updatePacket = core.updateObjectPacket(syncedIndex, unit)
-            if updatePacket and syncedIndex then
-                monocastMessage(playerIndex, updatePacket)
-            end
-        end
-    else
-        local vehicle = blam.object(get_object(player.vehicleObjectId))
-        if vehicle and core.isObjectNearToObject(vehicle, unit, constants.syncDistance) then
-            local updatePacket = core.updateObjectPacket(syncedIndex, unit)
-            if updatePacket and syncedIndex then
-                monocastMessage(playerIndex, updatePacket)
-            end
-        end
-    end
-end
-
 ---Syncs game data required just when the game starts
 ---@param playerIndex number
 ---@return boolean repeat
@@ -303,11 +266,7 @@ function SyncUpdate(playerIndex)
                     assert(unit, "Unit cast failed")
                     local syncedIndex = core.getSyncedIndexByObjectId(objectHandle)
                     if isUnit and syncedIndex and core.isObjectSynceable(object, objectHandle) then
-                        if isVehicle then
-                            updateNetworkObjectNoLook(playerIndex, unit, objectHandle, syncedIndex)
-                        else
-                            updateNetworkObject(playerIndex, unit, objectHandle, syncedIndex)
-                        end
+                        updateNetworkObject(playerIndex, unit, objectHandle, syncedIndex, not isVehicle)
                     end
                 end
             end
