@@ -965,22 +965,27 @@ local tagDataHeaderStructure = {
 }
 
 ---@class tagEntry
----@field primaryGroup string Primary group of the tag
----@field secondaryGroup string Secondary group of the tag
----@field tertiaryGroup string Tertiary group of the tag
--- @field handle number Tag handle, used for tag references
----@field handle { value: number, index: number, id: number } Handle of the tag, it is a struct with value, index and id
+---@field primaryClass string | any Primary group/class of the tag
+---@field secondaryClass string | any Secondary group/class of the tag
+---@field tertiaryClass string | any Tertiary group/class of the tag
+---@field handle { value: integer, index: integer, id: integer, isNull: fun(): boolean } Handle of the tag, it is a struct with value, index and id
 ---@field path string Path of the tag
----@field data number Data of the tag, it represents the actual tag data in get_object_memory
+---@field data any Data of the tag, it represents the actual tag data in get_object_memory
+---@field dataAddress any Address of the tag data, it can be used for direct memory manipulation of the tag data
 ---@field indexed boolean Is this tag indexed on an external map file
 
--- @class tagEntry<T> : { primaryGroup: string, secondaryGroup: string, tertiaryGroup: string, handle: number, path: string, data: T, indexed: boolean }
+-- @class tagEntry<T> : { primaryClass: string, secondaryClass: string, tertiaryClass: string, handle: number, path: string, data: T, indexed: boolean }
 
 -- Tag structure
 local tagEntryStructure = {
+    -- Just for API compability
     primaryGroup = {type = "dword", offset = 0x0},
     secondaryGroup = {type = "dword", offset = 0x4},
     tertiaryGroup = {type = "dword", offset = 0x8},
+
+    primaryClass = {type = "dword", offset = 0x0},
+    secondaryClass = {type = "dword", offset = 0x4},
+    tertiaryClass = {type = "dword", offset = 0x8},
     index = {type = "word", offset = 0xC}, -- Deprecated, use handle instead
     id = {type = "dword", offset = 0xC}, -- Deprecated, use handle instead
     handle = {
@@ -999,6 +1004,7 @@ local tagEntryStructure = {
     },
     path = {type = "string", offset = 0x10, is = "ptr"},
     data = {type = "dword", offset = 0x14},
+    dataAddress = {type = "dword", offset = 0x14},
     indexed = {type = "dword", offset = 0x18}
 }
 
@@ -1497,8 +1503,8 @@ function blam.tag.findTags(keyword, tagGroup)
 end
 
 -- Get a tag
----@param tagHandleOrPath EngineTagHandle|integer
----@param tagGroup
+---@param tagHandleOrPath EngineTagHandle|integer|string Tag handle or path of the tag to get, if a path is given, tag group must be provided as second argument
+---@param tagGroup? tagGroup Tag group of the tag to get, required if first argument is a path
 ---@return tagEntry?
 function blam.tag.getTag(tagHandleOrPath, tagGroup)
     if isNumber(tagHandleOrPath) then
@@ -1744,8 +1750,8 @@ function blam.gameState.getObject(handle, objectGroup)
             end
 
             -- Calculate object ID (this may be invalid, be careful)
-            handle =
-                (read_word(table.firstElementAddress + index * table.elementSize) * 0x10000) + index
+            handle = (read_word(table.firstElementAddress + index * table.elementSize) * 0x10000) +
+                         index
         else
             handle = idOrIndex
         end

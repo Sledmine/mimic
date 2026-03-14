@@ -971,38 +971,95 @@ function core.swapFirstPerson()
     -- TODO
 end
 
+local weaponsList
+
 function core.swapHUDElements()
     logger:debug("Swapping HUD elements...")
     local playerObject = blam.object(get_dynamic_player())
     if playerObject then
         local tagHandle = playerObject.tagId
-        ---@type MetaEngineBipedTag
-        local bipedTagEntry = blam2.tag.getTag(tagHandle)
-        assert(bipedTagEntry, "Failed to load biped tag")
+        local bipedTagEntry = blam2.tag.getTag(tagHandle) --[[@as MetaEngineBipedTag?]]
+        assert(bipedTagEntry, "Failed to load biped tag for player object")
+
+        if not weaponsList then
+            local weaponsListEntries = blam2.tag.findTags("", blam2.tag.groups.weapon) --[[@as MetaEngineWeaponTag[]?]]
+            assert(weaponsListEntries, "Failed to load weapons list tag")
+            weaponsList = table.map(weaponsListEntries, function(entry)
+                local pathSplit = entry.path:split("\\")
+                -- Normalized name to avoid using spaces (like stock tags did)
+                local name = pathSplit[#pathSplit]:replace(" ", "_")
+                return {name = name, entry = entry}
+            end)
+        end
+
+        -- Load globals tag for other global HUD elements
+        local globalsTagEntry = blam2.tag.findTag("globals\\globals", blam2.tag.groups.globals) --[[@as MetaEngineGlobalsTag?]]
+        assert(globalsTagEntry, "Failed to load globals tag")
 
         -- Let's define custom HUD elements paths
-        local pathSplit =  bipedTagEntry.path:split("\\")
+        local pathSplit = bipedTagEntry.path:split("\\")
         local bipedTagName = pathSplit[#pathSplit]
-        local bipedTagFolder = table.concat(table.slice(pathSplit, 1, #pathSplit - 1), "\\")
+        local baseTagDirectory = table.concat(table.slice(pathSplit, 1, #pathSplit - 1), "\\")
 
+        -- TODO Check for relative hud interface to biped reference instead of aside to biped folder
         -- Look for custom HUD tags
-        local unitHudInterfacePath = bipedTagFolder  .. "\\hud\\unit"
-        logger:debug("Looking for custom unit hud interface at path {}", unitHudInterfacePath)
-        local unitHudInterface = blam2.tag.getTag(unitHudInterfacePath, blam2.tag.groups.unitHudInterface)
+        local unitHudInterfacePath = baseTagDirectory .. "\\hud\\unit"
+        local unitHudInterface = blam2.tag.getTag(unitHudInterfacePath,
+                                                  blam2.tag.groups.unitHudInterface)
 
         if unitHudInterface then
-            logger:debug("Found custom unit hud interface at path {}, applying it to biped tag {}", unitHudInterfacePath, bipedTagEntry.path)
+            logger:debug("Found custom unit hud interface at path {}, applying it to biped tag {}",
+                         unitHudInterfacePath, bipedTagEntry.path)
         else
-            logger:debug("No custom unit hud interface found at path {}, skipping", unitHudInterfacePath)
+            logger:debug("No custom unit hud interface found at path {}, skipping",
+                         unitHudInterfacePath)
             return
         end
         local bipedTag = bipedTagEntry.data
+        ---@diagnostic disable-next-line: undefined-field
         local hudInterfaces = bipedTag.base.newHudInterfaces
         for i = 1, hudInterfaces.count do
             logger:debug(unitHudInterface.path)
             logger:debug(hudInterfaces.elements[i].hud.path)
-            --hudInterfaces.elements[i].hud.tagHandle = unitHudInterface.handle
+            -- hudInterfaces.elements[i].hud.tagHandle = unitHudInterface.handle
             hudInterfaces.elements[i].hud.tagHandle.value = unitHudInterface.handle.value
+        end
+
+        local globalsTag = globalsTagEntry.data
+        local grenades = globalsTag.grenades
+
+        -- Look for custom grenade HUD tags
+        local fragHudInterfacePath = baseTagDirectory .. "\\hud\\frag"
+        local fragHudInterface = blam2.tag.getTag(fragHudInterfacePath,
+                                                  blam2.tag.groups.grenadeHudInterface)
+        if not fragHudInterface then
+            logger:debug("No custom grenade hud interface found at path {}, skipping",
+                         fragHudInterfacePath)
+        else
+            grenades.elements[1].hudInterface.tagHandle.value = fragHudInterface.handle.value
+        end
+
+        local plasmaHudInterfacePath = baseTagDirectory .. "\\hud\\plasma"
+        local plasmaHudInterface = blam2.tag.getTag(plasmaHudInterfacePath,
+                                                    blam2.tag.groups.grenadeHudInterface)
+        if not plasmaHudInterface then
+            logger:debug("No custom plasma grenade hud interface found at path {}, skipping",
+                         plasmaHudInterfacePath)
+        else
+            grenades.elements[2].hudInterface.tagHandle.value = plasmaHudInterface.handle.value
+        end
+
+        -- Look for custom weapons HUD tags
+        for _, weapon in pairs(weaponsList) do
+            local weaponHudInterfacePath = baseTagDirectory .. "\\hud\\" .. weapon.name
+            local weaponHudInterface = blam2.tag.getTag(weaponHudInterfacePath,
+                                                        blam2.tag.groups.weaponHudInterface)
+            if not weaponHudInterface then
+                logger:debug("No custom weapon hud interface found at path {}, skipping",
+                             weaponHudInterfacePath)
+            else
+                weapon.entry.data.hudInterface.tagHandle.value = weaponHudInterface.handle.value
+            end
         end
     end
 end
