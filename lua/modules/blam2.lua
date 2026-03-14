@@ -16,7 +16,7 @@ local fmod = math.fmod
 local rad = math.rad
 local deg = math.deg
 
-local blam = {_VERSION = "2.0.0-dev", debug = false}
+local blam = {_VERSION = "2.0.1-dev", debug = false}
 
 ---Physics gravity default constant
 blam.PHYSICS_GRAVITY_DEFAULT = 996779464
@@ -857,7 +857,7 @@ local function createBindStruct(baseAddress, struct, parentStruct, parentMeta)
 
             if cTypes[fieldMeta.type] and cTypes[fieldMeta.type].write then
                 cTypes[fieldMeta.type].write(address, value, fieldMeta.offset)
-            elseif fieldMeta.is == "struct" then
+            elseif fieldMeta.is == "struct" or fieldMeta.is == "union" or fieldMeta.fields then
                 -- If it's a struct, we can set fields directly as it will trigger the __index metamethod
                 if type(value) == "table" then
                     for k, v in pairs(value) do
@@ -1494,6 +1494,19 @@ function blam.tag.findTags(keyword, tagGroup)
         end
     end
     return tagsList
+end
+
+-- Get a tag
+---@param tagHandleOrPath EngineTagHandle|integer
+---@param tagGroup
+---@return tagEntry?
+function blam.tag.getTag(tagHandleOrPath, tagGroup)
+    if isNumber(tagHandleOrPath) then
+        return blam.getTagEntry(tagHandleOrPath)
+    elseif isString(tagHandleOrPath) and tagGroup then
+        return blam.getTagEntry(tagHandleOrPath, tagGroup)
+    end
+    return nil
 end
 
 --- Return the index of a resource handle

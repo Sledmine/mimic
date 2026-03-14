@@ -430,7 +430,7 @@ function OnMapLoad()
     -- Continuously respawn scenario items to ensure players will have ammo and weapons
     script.continuous(function()
         if isItemsSystemOverridden then
-            logger:debug("Respawning scenario items...")
+            --logger:debug("Respawning scenario items...")
             core.dynamicallySpawnScenarioItems()
             script.sleep(blam.secondsToTicks(10))
         end

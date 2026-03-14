@@ -43,5 +43,13 @@ return {
             core.eraseNotServerControlledObjects()
             logger:info("Erased all locally created objects")
         end
+    },
+    override_items_system = {
+        description = "Enable or disable overriding the items system (experimental)",
+        help = "<enable>",
+        execute = function(enable)
+            IsItemsSystemOverridden = luna.bool(enable)
+            logger:info("Items system override " .. (IsItemsSystemOverridden and "enabled" or "disabled"))
+        end
     }
 }

@@ -803,9 +803,7 @@ local function evaluateObjectKeeper(item, objectHandle, networkItemsCount)
         if isAnyPlayerNear then
             -- Keep item alive if any player is near
             item.lastUpdateTick = engine.core.getTickCount()
-            logger:debug(
-                "Keeping item with handle {} alive because a player is nearby, distance: {}",
-                objectHandle, core.getDistanceBetweenObjects(item, playerObject))
+            -- logger:debug("Keeping item with handle {} alive because a player is nearby, distance: {}", objectHandle, core.getDistanceBetweenObjects(item, playerObject))
             return
         end
     end
@@ -965,6 +963,46 @@ function core.dynamicallySpawnScenarioItems(reset)
                     end
                 end
             end
+        end
+    end
+end
+
+function core.swapFirstPerson()
+    -- TODO
+end
+
+function core.swapHUDElements()
+    logger:debug("Swapping HUD elements...")
+    local playerObject = blam.object(get_dynamic_player())
+    if playerObject then
+        local tagHandle = playerObject.tagId
+        ---@type MetaEngineBipedTag
+        local bipedTagEntry = blam2.tag.getTag(tagHandle)
+        assert(bipedTagEntry, "Failed to load biped tag")
+
+        -- Let's define custom HUD elements paths
+        local pathSplit =  bipedTagEntry.path:split("\\")
+        local bipedTagName = pathSplit[#pathSplit]
+        local bipedTagFolder = table.concat(table.slice(pathSplit, 1, #pathSplit - 1), "\\")
+
+        -- Look for custom HUD tags
+        local unitHudInterfacePath = bipedTagFolder  .. "\\hud\\unit"
+        logger:debug("Looking for custom unit hud interface at path {}", unitHudInterfacePath)
+        local unitHudInterface = blam2.tag.getTag(unitHudInterfacePath, blam2.tag.groups.unitHudInterface)
+
+        if unitHudInterface then
+            logger:debug("Found custom unit hud interface at path {}, applying it to biped tag {}", unitHudInterfacePath, bipedTagEntry.path)
+        else
+            logger:debug("No custom unit hud interface found at path {}, skipping", unitHudInterfacePath)
+            return
+        end
+        local bipedTag = bipedTagEntry.data
+        local hudInterfaces = bipedTag.base.newHudInterfaces
+        for i = 1, hudInterfaces.count do
+            logger:debug(unitHudInterface.path)
+            logger:debug(hudInterfaces.elements[i].hud.path)
+            --hudInterfaces.elements[i].hud.tagHandle = unitHudInterface.handle
+            hudInterfaces.elements[i].hud.tagHandle.value = unitHudInterface.handle.value
         end
     end
 end

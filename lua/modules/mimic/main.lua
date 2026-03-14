@@ -23,6 +23,7 @@ local engine = Engine
 
 -- Script settings variables
 DisablePlayerCollision = false
+IsItemsSystemOverridden = false
 
 -- State
 local isMimicRunning = false
@@ -30,7 +31,6 @@ local firstTickAlready = false
 local packetCount = 0
 local packetsPerSecond = 0
 local timeSinceLastPacket = os.clock()
-local isItemsSystemOverridden = false
 
 -- Debug draw thing
 local nearestAIDetails = ""
@@ -408,12 +408,30 @@ script.continuous(function()
     if isMimicRunning and isItemsSystemOverridden then
         if engine.netgame.getServerType() == "local" then
             if firstTickAlready then
-                --logger:debug("Respawning scenario items...")
+                -- logger:debug("Respawning scenario items...")
                 core.dynamicallySpawnScenarioItems()
                 script.sleep(blam.secondsToTicks(10))
             end
         end
     end
+end)
+
+local lastUnitTagHandle = nil
+
+script.continuous(function()
+    sleep(1)
+    sleep(function()
+        local unit = blam.unit(get_dynamic_player())
+        if unit then
+            if unit.tagId ~= lastUnitTagHandle then
+                lastUnitTagHandle = unit.tagId
+                return true
+            end
+        end
+        return false
+    end)
+    logger:debug("Player unit changed...")
+    core.swapHUDElements()
 end)
 
 --- OnPacket
