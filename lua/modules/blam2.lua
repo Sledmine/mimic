@@ -1134,6 +1134,10 @@ local function createTag(address)
         tag.primaryGroup = integerToTagGroup(tag.primaryGroup)
         tag.secondaryGroup = integerToTagGroup(tag.secondaryGroup)
         tag.tertiaryGroup = integerToTagGroup(tag.tertiaryGroup)
+
+        tag.primaryClass = integerToTagGroup(tag.primaryClass)
+        tag.secondaryClass = integerToTagGroup(tag.secondaryClass)
+        tag.tertiaryClass = integerToTagGroup(tag.tertiaryClass)
         tag.address = address
 
         local tagStructureModuleName
@@ -1478,7 +1482,7 @@ end
 function blam.tag.findTag(keyword, tagGroup)
     for tagIndex = 0, blam.tagDataHeader.count - 1 do
         local tag = blam.getTagEntry(tagIndex)
-        if tag and tag.path:find(keyword, 1, true) and tag.primaryGroup == tagGroup then
+        if tag and tag.path:find(keyword, 1, true) and tag.primaryClass == tagGroup then
             return tag
         end
     end
@@ -1495,7 +1499,7 @@ function blam.tag.findTags(keyword, tagGroup)
     local tagsList = {}
     for tagIndex = 0, blam.tagDataHeader.count - 1 do
         local tag = blam.getTagEntry(tagIndex)
-        if tag and tag.path:find(keyword, 1, true) and tag.primaryGroup == tagGroup then
+        if tag and tag.path:find(keyword, 1, true) and tag.primaryClass == tagGroup then
             tagsList[#tagsList + 1] = tag
         end
     end
@@ -1724,7 +1728,6 @@ function blam.globalGravity(gravity)
 end
 
 ---Restore global gravity to default value
----@return boolean
 function blam.restoreGlobalGravity()
     local gravityAddress = addressList.globalGravity
     write_dword(gravityAddress, blam.PHYSICS_GRAVITY_DEFAULT)

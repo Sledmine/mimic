@@ -419,11 +419,11 @@ end)
 local lastUnitTagHandle = nil
 
 script.continuous(function()
-    sleep(1)
+    sleep(3)
     sleep(function()
         local unit = blam.unit(get_dynamic_player())
         if unit then
-            if unit.tagId ~= lastUnitTagHandle then
+            if not isNull(unit.tagId) and unit.tagId ~= lastUnitTagHandle then
                 lastUnitTagHandle = unit.tagId
                 return true
             end
