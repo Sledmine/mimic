@@ -1040,13 +1040,21 @@ function core.swapHUDElements()
 
         -- Look for custom weapons HUD tags
         for _, weapon in pairs(weaponsList) do
-            local weaponHudInterfacePath = baseTagDirectory .. "" .. weapon.name
+            local weaponHudInterfacePath = baseTagDirectory .. "weapons\\" .. weapon.name
             local weaponHudInterface = blam2.tag.getTag(weaponHudInterfacePath,
                                                         blam2.tag.groups.weaponHudInterface)
             if weaponHudInterface then
                 --logger:debug("Found custom weapon hud interface at path {}, applying it to weapon {}", weaponHudInterfacePath, weapon.entry.path)
                 weapon.entry.data.hudInterface.tagHandle.value = weaponHudInterface.handle.value
             end
+        end
+
+        --Look for hud number tags
+        local hudNumbersPath = baseTagDirectory .. "digits"
+        local hudNumbers = blam2.tag.getTag(hudNumbersPath, blam2.tag.groups.hudNumber)
+        if hudNumbers then
+            logger:debug("Found custom hud numbers at path {}, applying it to globals tag {}", hudNumbersPath, globalsTagEntry.path)
+            globalsTag.interfaceBitmaps.elements[1].hudDigitsDefinition.tagHandle.value = hudNumbers.handle.value
         end
     end
 end
