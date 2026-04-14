@@ -999,7 +999,12 @@ function core.swapHUDElements()
         -- Let's define custom HUD elements paths
         local bipedTag = bipedTagEntry.data
         ---@diagnostic disable-next-line: undefined-field
-        local unitHudPath = bipedTag.base.newHudInterfaces.elements[1].hud.path
+        local hudElements = bipedTag.base.newHudInterfaces.elements
+        if not hudElements then
+            --logger:debug("No HUD elements found in biped tag {}, skipping HUD swap", bipedTagEntry.path)
+            return
+        end
+        local unitHudPath = hudElements[1].hud.path
         --logger:debug("Player unit HUD path: {}", unitHudPath)
         local pathSplit = unitHudPath:split("\\")
         local baseTagDirectory = table.concat(table.slice(pathSplit, 1, #pathSplit - 1), "\\") .. "\\"
