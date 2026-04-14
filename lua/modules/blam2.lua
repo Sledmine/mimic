@@ -16,7 +16,7 @@ local fmod = math.fmod
 local rad = math.rad
 local deg = math.deg
 
-local blam = {_VERSION = "2.0.1-dev", debug = false}
+local blam = {_VERSION = "2.0.2-dev", debug = false}
 
 ---Physics gravity default constant
 blam.PHYSICS_GRAVITY_DEFAULT = 996779464
@@ -82,13 +82,16 @@ local function split(s, sep)
     return array
 end
 
-local null = 0xFFFFFFFF
+local NULL = 0xFFFFFFFF
+-- Valid user-mode memory range for a Halo CE process
+local PROCESS_MEMORY_BASE_ADDRESS    = 0x400000   -- Default Win32 PE image base; anything below is unmapped/null-page
+local PROCESS_MEMORY_CEILING_ADDRESS = 0x6FFFFFFF -- Conservative ceiling below the 0x7FFFFFFF user/kernel boundary
 
 --- Get if given value equals a null value in game engine terms
 ---@param value any
 ---@return boolean
 function blam.isNull(value)
-    if value == 0xFF or value == 0xFFFF or value == null or value == nil then
+    if value == 0xFF or value == 0xFFFF or value == NULL or value == nil then
         return true
     end
     return false
@@ -816,6 +819,12 @@ local function createBindStruct(baseAddress, struct, parentStruct, parentMeta)
             assert(fieldMeta and address, "Field '" .. key .. "' not found in struct")
             local value
 
+            -- Address is not valid, likely a null pointer, we can return nil without trying to read it
+            if not (address >= PROCESS_MEMORY_BASE_ADDRESS and address <= PROCESS_MEMORY_CEILING_ADDRESS) then
+                printdebug(string.format("0x%x", address), key .. " (" .. tostring(fieldMeta.type) ..
+                           ") INVALID ADDRESS, returning nil")
+                return nil
+            end
             if cTypes[fieldMeta.type] and cTypes[fieldMeta.type].read then
                 value = cTypes[fieldMeta.type].read(address, fieldMeta.offset)
             elseif fieldMeta.is == "struct" or fieldMeta.is == "union" or fieldMeta.fields then
@@ -846,7 +855,6 @@ local function createBindStruct(baseAddress, struct, parentStruct, parentMeta)
             end
             printdebug(string.format("0x%x", address),
                        key .. " (" .. tostring(fieldMeta.type) .. ") READ = " .. tostring(value))
-
             return value
         end,
         __newindex = function(t, key, value)
@@ -855,6 +863,12 @@ local function createBindStruct(baseAddress, struct, parentStruct, parentMeta)
             printdebug(string.format("0x%x", address),
                        key .. " (" .. tostring(fieldMeta.type) .. ") WRITE = " .. tostring(value))
 
+            -- Address is not valid, likely a null pointer, we can return nil without trying to read it
+            if not (address >= PROCESS_MEMORY_BASE_ADDRESS and address <= PROCESS_MEMORY_CEILING_ADDRESS) then
+                printdebug(string.format("0x%x", address), key .. " (" .. tostring(fieldMeta.type) ..
+                           ") INVALID ADDRESS, write cancelled")
+                return
+            end
             if cTypes[fieldMeta.type] and cTypes[fieldMeta.type].write then
                 cTypes[fieldMeta.type].write(address, value, fieldMeta.offset)
             elseif fieldMeta.is == "struct" or fieldMeta.is == "union" or fieldMeta.fields then
@@ -1052,7 +1066,7 @@ blam.tagDataHeader = createBindStruct(addressList.tagDataHeader, tagDataHeaderSt
 -- Add utilities to library
 blam.dumpTable = dumpTable
 blam.consoleOutput = consoleOutput
-blam.null = null
+blam.null = NULL
 
 ---Get the current game camera type
 ---@return number?
