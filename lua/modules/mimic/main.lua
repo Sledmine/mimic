@@ -16,8 +16,6 @@ package.preload["luna"] = nil
 package.loaded["luna"] = nil
 require "luna"
 local color = require "ncolor"
-local memoize = require "memoize"
-local tonumber = memoize(tonumber)
 local balltze = Balltze
 local engine = Engine
 
