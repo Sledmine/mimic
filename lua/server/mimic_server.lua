@@ -49,6 +49,7 @@ local deviceMachinesList = {}
 LastSyncCommand = ""
 local currentBspIndex
 local currentScenario = nil
+DisablePlayerCollision = true
 
 logger = Balltze.logger.createLogger("Mimic Server")
 
@@ -435,6 +436,12 @@ function OnMapLoad()
             script.sleep(blam.secondsToTicks(10))
         end
     end)
+
+    -- Continuously disable player collision to improve sync experience
+    script.continuous(function()
+        core.disablePlayerCollision(DisablePlayerCollision)
+        script.sleep(blam.secondsToTicks(1))
+    end)
 end
 
 function OnTick()
@@ -450,9 +457,6 @@ function OnTick()
         local playerBiped = blam.biped(get_dynamic_player(playerIndex))
         if playerBiped then
             local player = blam.player(get_player(playerIndex))
-
-            -- TODO We might need to optimize this
-            blam.bipedTag(playerBiped.tagId).disableCollision = true
 
             -- We might need to turn this into a feature or something cause it affects maps
             -- that have phantom BSPs causing the player to be out side of the map for a fraction

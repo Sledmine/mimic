@@ -29,6 +29,17 @@ local firstTickAlready = false
 local packetCount = 0
 local packetsPerSecond = 0
 local timeSinceLastPacket = os.clock()
+local lastUnitTagHandle = nil
+
+local function resetState()
+    isMimicRunning = false
+    firstTickAlready = false
+    packetCount = 0
+    packetsPerSecond = 0
+    timeSinceLastPacket = os.clock()
+    lastUnitTagHandle = nil
+    nearestAIDetails = ""
+end
 
 -- Debug draw thing
 local nearestAIDetails = ""
@@ -414,8 +425,6 @@ script.continuous(function()
     end
 end)
 
-local lastUnitTagHandle = nil
-
 script.continuous(function()
     sleep(3)
     sleep(function()
@@ -470,9 +479,11 @@ function OnPacket(message)
         end
         return false
     elseif message == "disable_biped_collision" then
+        logger:debug("Disabling player collision...")
         DisablePlayerCollision = true
         return false
     elseif message == "enable_biped_collision" then
+        logger:debug("Enabling player collision...")
         DisablePlayerCollision = false
         return false
     end
@@ -482,6 +493,7 @@ function OnUnload()
     if engine.core.getTickCount() > 0 then
         DisablePlayerCollision = false
     end
+    resetState()
 end
 
 function OnPreFrame()
@@ -529,6 +541,11 @@ end)
 local onFrame = balltze.event.frame.subscribe(function(event)
     if event.time == "before" then
         OnPreFrame()
+    end
+end)
+local onMapLoad = balltze.event.mapLoad.subscribe(function(event)
+    if event.time == "before" then
+        resetState()
     end
 end)
 
