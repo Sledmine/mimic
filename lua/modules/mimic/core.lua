@@ -663,24 +663,12 @@ end
 --- Disable player collision
 ---@param enable boolean
 function core.disablePlayerCollision(enable)
-    if engine.netgame.getServerType() == "dedicated" then
-        for playerIndex = 1, 16 do
-            local playerObject = get_dynamic_player(playerIndex)
-            if playerObject then
-                local biped = blam.biped(playerObject)
-                if biped then
-                    blam.bipedTag(biped.tagId).disableCollision = enable
-                end
-            end
-        end
-    else
-        for playerIndex = 0, 15 do
-            local playerObject = get_dynamic_player(playerIndex)
-            if playerObject then
-                local biped = blam.biped(playerObject)
-                if biped then
-                    blam.bipedTag(biped.tagId).disableCollision = enable
-                end
+    for playerIndex = constants.firstPlayerIndex, constants.lastPlayerIndex do
+        local playerObject = get_dynamic_player(playerIndex)
+        if playerObject then
+            local biped = blam.biped(playerObject)
+            if biped then
+                blam.bipedTag(biped.tagId).disableCollision = enable
             end
         end
     end
@@ -1001,13 +989,14 @@ function core.swapHUDElements()
         ---@diagnostic disable-next-line: undefined-field
         local hudElements = bipedTag.base.newHudInterfaces.elements
         if not hudElements then
-            --logger:debug("No HUD elements found in biped tag {}, skipping HUD swap", bipedTagEntry.path)
+            -- logger:debug("No HUD elements found in biped tag {}, skipping HUD swap", bipedTagEntry.path)
             return
         end
         local unitHudPath = hudElements[1].hud.path
-        --logger:debug("Player unit HUD path: {}", unitHudPath)
+        -- logger:debug("Player unit HUD path: {}", unitHudPath)
         local pathSplit = unitHudPath:split("\\")
-        local baseTagDirectory = table.concat(table.slice(pathSplit, 1, #pathSplit - 1), "\\") .. "\\"
+        local baseTagDirectory = table.concat(table.slice(pathSplit, 1, #pathSplit - 1), "\\") ..
+                                     "\\"
 
         -- Look for custom HUD tags
         local unitHudInterfacePath = baseTagDirectory .. "unit"
@@ -1015,9 +1004,9 @@ function core.swapHUDElements()
                                                   blam2.tag.groups.unitHudInterface)
 
         if unitHudInterface then
-            --logger:debug("Found custom unit hud interface at path {}, applying it to biped tag {}", unitHudInterfacePath, bipedTagEntry.path)
+            -- logger:debug("Found custom unit hud interface at path {}, applying it to biped tag {}", unitHudInterfacePath, bipedTagEntry.path)
         else
-            --logger:debug("No custom unit hud interface found at path {}, skipping", unitHudInterfacePath)
+            -- logger:debug("No custom unit hud interface found at path {}, skipping", unitHudInterfacePath)
             return
         end
 
@@ -1029,7 +1018,7 @@ function core.swapHUDElements()
         local fragHudInterface = blam2.tag.getTag(fragHudInterfacePath,
                                                   blam2.tag.groups.grenadeHudInterface)
         if not fragHudInterface then
-            --logger:debug("No custom grenade hud interface found at path {}, skipping", fragHudInterfacePath)
+            -- logger:debug("No custom grenade hud interface found at path {}, skipping", fragHudInterfacePath)
         else
             grenades.elements[1].hudInterface.tagHandle.value = fragHudInterface.handle.value
         end
@@ -1038,7 +1027,7 @@ function core.swapHUDElements()
         local plasmaHudInterface = blam2.tag.getTag(plasmaHudInterfacePath,
                                                     blam2.tag.groups.grenadeHudInterface)
         if not plasmaHudInterface then
-            --logger:debug("No custom plasma grenade hud interface found at path {}, skipping", plasmaHudInterfacePath)
+            -- logger:debug("No custom plasma grenade hud interface found at path {}, skipping", plasmaHudInterfacePath)
         else
             grenades.elements[2].hudInterface.tagHandle.value = plasmaHudInterface.handle.value
         end
@@ -1049,17 +1038,19 @@ function core.swapHUDElements()
             local weaponHudInterface = blam2.tag.getTag(weaponHudInterfacePath,
                                                         blam2.tag.groups.weaponHudInterface)
             if weaponHudInterface then
-                --logger:debug("Found custom weapon hud interface at path {}, applying it to weapon {}", weaponHudInterfacePath, weapon.entry.path)
+                -- logger:debug("Found custom weapon hud interface at path {}, applying it to weapon {}", weaponHudInterfacePath, weapon.entry.path)
                 weapon.entry.data.hudInterface.tagHandle.value = weaponHudInterface.handle.value
             end
         end
 
-        --Look for hud number tags
+        -- Look for hud number tags
         local hudNumbersPath = baseTagDirectory .. "digits"
         local hudNumbers = blam2.tag.getTag(hudNumbersPath, blam2.tag.groups.hudNumber)
         if hudNumbers then
-            logger:debug("Found custom hud numbers at path {}, applying it to globals tag {}", hudNumbersPath, globalsTagEntry.path)
-            globalsTag.interfaceBitmaps.elements[1].hudDigitsDefinition.tagHandle.value = hudNumbers.handle.value
+            logger:debug("Found custom hud numbers at path {}, applying it to globals tag {}",
+                         hudNumbersPath, globalsTagEntry.path)
+            globalsTag.interfaceBitmaps.elements[1].hudDigitsDefinition.tagHandle.value =
+                hudNumbers.handle.value
         end
     end
 end
