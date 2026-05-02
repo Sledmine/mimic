@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.1.0] - 2026-05-02
+### Added
+- Passive HUD per biped system, allowing to show different HUD elements for different bipeds (grenades, weapons, check FEATURES.md for more info)
+- Locally created objects that should be controlled/synced by the server are now deleted after a certain amount of time, to prevent running out of object slots in long play sessions, also helps rendering performance a bit
+- System to override network control of "usable" items such as weapons and equipment, allows players to interact with items without the server collecting these too early, similarly to how singleplayer works (check FEATURES.md for more info)
+- Experimental network timeout patch, increasing the timeout time for player connections to prevent disconnections in long play sessions with bad network conditions, still needs more testing and tweaking
+
+### Changed
+- Feign death chance for units has been removed until we add a better sync method to handle it, this prevents bipeds from desyncing and entering a seizure state when they are considered as dead by the server, but not by the client, this also means that units that should fake death will now stay dead until garbage collected
+
+### Fixed
+- Another incremental memory leak that reduced performance slowly over time, as bipeds moved around some unnecesary values were memoized, slowing down garbage collection
+
 ## [4.0.0] - 2025-12-09
 ### Added
 - Add support for syncing HSC functions and events with new transpiler event layer
