@@ -10,8 +10,24 @@ If the tag paths are obfuscated, Mimic will not be able to find the tags and swa
 
 ## Features
 
+- Server sided projectile creation
 - FP Swapping based on current player biped
 - HUD elements swapping based on current player biped
+- Items Sync Override to prevent items from being collected by the server
+
+### Server Sided Projectile Creation
+
+This feature allows projectiles to be created on the server side instead of the client side, allowing
+for AI to actually show the projectiles they shoot, not really for better synchronization of projectile effects
+as some of these get lost due to effects being created on the client side, these projectiles might not
+create proper damage reponse effects or particles on the clients but at least they will be visible
+and somewhat synchronized in terms of position and movement, allowing for better feedback of the AI
+attacks and interactions with the environment and players.
+
+**NOTE:** This feature is only enabled if Mimic detects there are any AI encounter in the scenario,
+otherwise it will be disabled to avoid interfering with projectile creation in normal multiplayer maps.
+
+When a projectile is spawned, the server will create it and then replicate it to all clients, ensuring that all players see the same projectiles in the same positions. This also allows for better synchronization of projectile effects and interactions with the environment and other players.
 
 ### FP Swapping
 
