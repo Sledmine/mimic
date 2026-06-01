@@ -11,6 +11,7 @@ If the tag paths are obfuscated, Mimic will not be able to find the tags and swa
 ## Features
 
 - Server sided projectile creation
+- Object permutation synchronization for units
 - FP Swapping based on current player biped
 - HUD elements swapping based on current player biped
 - Items Sync Override to prevent items from being collected by the server
