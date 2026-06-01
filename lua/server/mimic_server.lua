@@ -556,7 +556,7 @@ function OnCommand(playerIndex, command, environment, rconPassword)
     end
 end
 
-function OnScriptLoad()
+function PluginLoad()
     logger:muteDebug(not DebugMode)
 
     setItemCollectionThreshold(blam.secondsToTicks(15))
@@ -581,6 +581,7 @@ function OnScriptLoad()
     end
 
     -- Set server callback
+    -- TODO Balltze Migrate
     register_callback(cb["EVENT_GAME_START"], "OnMapLoad")
     register_callback(cb["EVENT_GAME_END"], "OnGameEnd")
     register_callback(cb["EVENT_OBJECT_SPAWN"], "OnObjectSpawn")
@@ -609,7 +610,7 @@ function OnObjectSpawn(playerIndex, tagId, parentId, objectId)
 end
 
 -- Cleanup
-function OnScriptUnload()
+function PluginUnload()
     if failMessageAddress then
         -- Restore "rcon command failure" message
         safe_write(true)

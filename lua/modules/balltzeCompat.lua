@@ -312,3 +312,11 @@ if type(register_callback) == "function" and type(cb) == "table" then
         set_callback("rcon message", "_BalltzeOnRconMessage")
     end
 end
+
+function OnScriptLoad()
+    PluginLoad()
+end
+
+function OnScriptUnload()
+    PluginUnload()
+end
