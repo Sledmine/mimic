@@ -461,7 +461,7 @@ function OnPacket(message)
         local data = message:split "sync_"
         local command = data[2]:replace("'", "\""):trim()
         if DebugMode then
-            if DebugLevel >= 2 then
+            if DebugLevel >= 3 then
                 logger:debug("Forced sync command: {}", command)
             end
             packetCount = packetCount + 1
