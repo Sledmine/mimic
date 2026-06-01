@@ -560,7 +560,11 @@ function PluginLoad()
     logger:muteDebug(not DebugMode)
 
     setItemCollectionThreshold(blam.secondsToTicks(15))
-    --core.patchPlayerConnectionTimeout()
+
+    if Engine.netgame.getServerType() == "local" or Engine.netgame.getServerType() == "sapp" then
+        core.patchPlayerConnectionTimeout()
+    end
+    
     rconPasswordAddress = read_dword(sig_scan("7740BA??????008D9B000000008A01") + 0x3)
     failMessageAddress = read_dword(sig_scan("B8????????E8??000000A1????????55") + 0x1)
     allowClientSideWeaponProjectilesAddress = read_dword(sig_scan("803D????????01741533C0EB") + 0x2)
