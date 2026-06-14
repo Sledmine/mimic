@@ -3,7 +3,24 @@
 local blam = require "blam"
 local luna = require "luna"
 Balltze = Balltze or {logger = {}}
-Engine = Engine or {core = {}, hsc = {}, tag = {}, netgame = {}, gameState = {}, userInterface = {}}
+Engine = Engine or
+             {
+        core = {},
+        hsc = {},
+        tag = {},
+        netgame = {},
+        gameState = {},
+        userInterface = {},
+        map = {}
+    }
+
+-- Override cprint to make it faster! (original cprint is very slow)
+function cprint(message, colorId)
+    if colorId then
+        message = "\x1b[1;" .. colorId .. "m" .. message .. "\x1b[0m"
+    end
+    print(message)
+end
 
 function Engine.tag.getTag(tagHandleOrPath, tagClass)
     ---@diagnostic disable-next-line: param-type-mismatch
@@ -319,4 +336,17 @@ end
 
 function OnScriptUnload()
     PluginUnload()
+end
+
+function Engine.map.getCurrentMapHeader()
+    return {
+        engineType = "custom",
+        fileSize = 0,
+        tagDataOffset = 0x40440000,
+        tagDataSize = 0,
+        name = get_var(0, "$map"),
+        build = "unknown",
+        gameType = "multiplayer",
+        crc32 = 0
+    }
 end
