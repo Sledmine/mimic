@@ -16,8 +16,8 @@ require "compat53"
 require "balltzeCompat"
 
 -- Pre require structures for blam2
-require "structures.tag.biped"
-require "structures.tag.scenario"
+assert(require "structures.tag.biped")
+assert(require "structures.tag.scenario")
 
 local blam = require "blam"
 console_out = cprint
