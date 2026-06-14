@@ -6,6 +6,12 @@ require "luna"
 local commands = require "mimic.commands"
 local script = require "script"
 
+-- Pre require structures for blam2
+require "structures.tag.biped"
+require "structures.tag.weapon"
+require "structures.tag.scenario"
+require "structures.tag.globals"
+
 DebugMode = false
 DebugLevel = 1
 IsSyncEnabled = true
