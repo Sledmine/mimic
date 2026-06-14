@@ -647,7 +647,7 @@ end
 
 local setDisconnectedFlagAddress = 0x004cbbb0 + 0x1
 local stockTimeout = 15000
-local expandedTimeout = 35000
+local expandedTimeout = stockTimeout * 2
 function core.patchPlayerConnectionTimeout(revert)
     safe_write(true)
     -- Increase player connection timeout
