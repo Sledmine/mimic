@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.1.1] - 2026-06-14
+### Fixed
+- Missing structure modules in bundled release files (caused a lot of operations to fail due to missing data)
+
+### Changed
+- Logs message using Balltze logger now log exponentially faster as text printing now uses the native Lua printing function (not c binding anymore)
+
 ## [4.1.0] - 2026-05-02
 ### Added
 - Passive HUD per biped system, allowing to show different HUD elements for different bipeds (grenades, weapons, check FEATURES.md for more info)
