@@ -23,7 +23,6 @@ function PluginMetadata()
     return {
         name = "Mimic",
         author = "Sledmine",
-        --version = "4.1.0",
         version = require "mimic.version",
         targetApi = "1.2.0",
         reloadable = true
