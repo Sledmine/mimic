@@ -3,8 +3,8 @@
 ----------------------------------------------------
 -- This script attempts to transpile a HSC script for Halo Combat Evolved to Lua
 -- It aims to parse any HSC script made for any version of Halo Combat Evolved (MCC, Custom Edition, Open Sauce, etc)
--- Officially just Custom Edition is supported, but it will get updates to support MCC later
--- (not supported yet due to addition of custom functions that can receive parameters and return values)
+-- Officially just Custom Edition is supported, but in practice we have been able to port up to Halo 3 HSC code!
+-- NOTE: It now supports passing arguments to scripts as well as returning from them! (this was not originally supported in Custom Edition)
 -- Uses LPEG for parsing and creating a semi AST to convert to Lua code, using an proto module script
 -- reimplementation of how hsc "scripts" work, but using coroutines and integrating with Balltze.
 --
@@ -20,9 +20,6 @@
 (global long lua_long 0)
 (global real lua_real 0)
 (global string lua_string "")
-(global unit lua_unit none)
-(global object lua_object none)
-(global object_list lua_object_list none)
 --]] --
 -- This variables will be used later on as some cache variables to store values so we can execute
 -- HSC using built in functions from the game and store the actual results from these and get them
