@@ -23,7 +23,7 @@ sync using Lua scripting on the server side and sending that information back to
 connected to the server that need that information depending on the situation.
 
 **NOTE:** HSC scripts only can be synced by transpiling HSC scripts to Lua using the new
-transpiler script, check the [HSC Transpiler](https://github.com/Sledmine/coop-evolved/blob/1.10.0/docs/PORTING_MAPS.md)
+transpiler script, check the [HSC Transpiler](https://github.com/Sledmine/coop-evolved/blob/main/docs/PORTING_MAPS.md)
 documentation for more information about how to use it.
 
 # Features
@@ -31,12 +31,12 @@ documentation for more information about how to use it.
 - [x] Object permutations sync
 - [x] Object color permutation sync
 - [x] Object weapon carrying sync
-- [x] Bipeds vehicles sync (only for non driver bipeds)
+- [x] Bipeds vehicles sync
 - [x] BSP index sync
 - [x] Device machines sync (only for named machines)
 - [x] Sync server side projectiles (only works well on certain projectiles)
-- [x] Script events sync (only on recompiled maps)
-- [ ] Object special properties sync (such as levitate, shield, camera, etc)
+- [x] Script events sync (only on maps with transpiled HSC to Lua)
+- [x] Object special properties sync (such as levitate, shield, camera, etc)
 - [ ] Object client side patching (allow sounds being played on client side)
 - [ ] Full vehicle sync (position, rotation, driver and passengers)
 
