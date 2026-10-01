@@ -3,8 +3,11 @@
 -- Sledmine (https://github.com/Sledmine)
 -- Server side synchronization feature for AI
 ------------------------------------------------------------------------------
--- Declare api version before importing lua-blam
-api_version = "1.12.0.0"
+-- Pre require structures for blam2
+assert(require "structures.tag.biped")
+assert(require "structures.tag.scenario")
+
+require "balltzeCompat"
 
 -- Lua modules
 require "luna"
@@ -12,12 +15,7 @@ local split = string.split
 local startswith = string.startswith
 
 -- Bring compatibility modules (Lua 5.3 and Balltze API)
-require "compat53"
-require "balltzeCompat"
 
--- Pre require structures for blam2
-assert(require "structures.tag.biped")
-assert(require "structures.tag.scenario")
 
 local blam = require "blam"
 console_out = cprint
